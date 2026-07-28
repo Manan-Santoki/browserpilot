@@ -1,7 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildSystemPrompt } from "../src/agent/prompt";
 import { startAgent, type QueryFn } from "../src/agent/runner";
 import type { RobotEvent } from "../src/session/events";
+
+/**
+ * The SDK hands its permission callback more context than we use. Tests only
+ * care about the signal, so fill the rest in one place.
+ */
+const permissionOptions = () =>
+  ({
+    signal: new AbortController().signal,
+    toolUseID: "tu_test",
+    requestId: "req_test",
+  }) as unknown as Parameters<CanUseTool>[2];
 
 const OPTS = {
   cdpEndpoint: "http://127.0.0.1:1234",
@@ -131,10 +143,10 @@ describe("startAgent", () => {
     const result = await canUseTool(
       "mcp__playwright__browser_click",
       { element: "Save" },
-      { signal: new AbortController().signal },
+      permissionOptions(),
     );
 
-    expect(result.behavior).toBe("allow");
+    expect(result?.behavior).toBe("allow");
     expect(events.some((e) => e.type === "approval_request")).toBe(false);
     await runner.stop();
   });
@@ -151,7 +163,7 @@ describe("startAgent", () => {
     const pending = canUseTool(
       "mcp__playwright__browser_click",
       { element: "Delete purchase order" },
-      { signal: new AbortController().signal },
+      permissionOptions(),
     );
 
     await Bun.sleep(20);
@@ -160,7 +172,7 @@ describe("startAgent", () => {
     if (request?.type !== "approval_request") throw new Error("unreachable");
 
     runner.approve(request.requestId, true);
-    expect((await pending).behavior).toBe("allow");
+    expect((await pending)?.behavior).toBe("allow");
     expect(events).toContainEqual({
       type: "approval_resolved",
       requestId: request.requestId,
@@ -181,7 +193,7 @@ describe("startAgent", () => {
     const pending = canUseTool(
       "mcp__playwright__browser_click",
       { element: "Cancel order" },
-      { signal: new AbortController().signal },
+      permissionOptions(),
     );
     await Bun.sleep(20);
     const request = events.find((e) => e.type === "approval_request");
@@ -189,8 +201,9 @@ describe("startAgent", () => {
 
     runner.approve(request.requestId, false);
     const result = await pending;
-    expect(result.behavior).toBe("deny");
-    if (result.behavior !== "deny") throw new Error("unreachable");
+    if (result === null || result.behavior !== "deny") {
+      throw new Error(`expected a denial, got ${JSON.stringify(result)}`);
+    }
     expect(result.message).toMatch(/declined/i);
     await runner.stop();
   });
