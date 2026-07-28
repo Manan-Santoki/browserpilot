@@ -4,7 +4,11 @@ import type { JwmUser } from "../auth/mint";
 import type { ClientCommand, RobotEvent } from "../session/events";
 import type { SessionManager } from "../session/manager";
 
-type SocketData = { sessionId: string; unsubscribe?: () => void };
+type SocketData = {
+  sessionId: string;
+  unsubscribe?: () => void;
+  unsubscribeFrames?: () => void;
+};
 
 export type ServerOptions = {
   port: number;
@@ -88,6 +92,11 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         ws.data.unsubscribe = manager.subscribe(ws.data.sessionId, (event) => {
           ws.send(JSON.stringify(event));
         });
+        // Preview frames ride the same socket as binary messages; clients tell
+        // the two lanes apart by frame type, not by an envelope.
+        ws.data.unsubscribeFrames = manager.subscribeFrames(ws.data.sessionId, (frame) => {
+          ws.send(Buffer.from(frame, "base64"));
+        });
       },
 
       message(ws: ServerWebSocket<SocketData>, raw) {
@@ -108,7 +117,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             manager.approve(id, command.requestId, command.approved);
             break;
           case "preview":
-            manager.setPreview(id, command.enabled);
+            void manager.setPreview(id, command.enabled);
             break;
           case "stop":
             void manager.stop(id);
@@ -118,6 +127,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
 
       close(ws: ServerWebSocket<SocketData>) {
         ws.data.unsubscribe?.();
+        ws.data.unsubscribeFrames?.();
       },
     },
   });

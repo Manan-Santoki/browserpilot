@@ -44,6 +44,7 @@ function start() {
         stop: async () => {},
       };
     },
+    startScreencast: async () => ({ stop: async () => {} }),
   };
 
   const manager = new SessionManager(config, deps);

@@ -32,6 +32,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
         closed.agent++;
       },
     }),
+    startScreencast: async () => ({ stop: async () => {} }),
     ...overrides,
   };
 

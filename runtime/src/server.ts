@@ -1,5 +1,6 @@
 import { credentialEnv, loadConfig } from "./config";
 import { launchRobotBrowser } from "./browser/chromium";
+import { startScreencast } from "./browser/screencast";
 import { startAgent } from "./agent/runner";
 import { SessionManager } from "./session/manager";
 import { createServer } from "./http/routes";
@@ -21,6 +22,7 @@ const manager = new SessionManager(
     now: () => Date.now(),
     launchBrowser: launchRobotBrowser,
     startAgent: (args) => startAgent(args),
+    startScreencast: (page, onFrame) => startScreencast(page, onFrame),
   },
 );
 

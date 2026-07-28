@@ -21,9 +21,15 @@ export type AgentArgs = {
   onEvent: (event: RobotEvent) => void;
 };
 
+export type ScreencastStarter = (
+  page: RobotBrowser["page"],
+  onFrame: (jpegBase64: string) => void,
+) => Promise<{ stop(): Promise<void> }>;
+
 export type ManagerDeps = {
   launchBrowser: (args: LaunchArgs) => Promise<RobotBrowser>;
   startAgent: (args: AgentArgs) => Promise<AgentRunner>;
+  startScreencast: ScreencastStarter;
   now: () => number;
 };
 
@@ -48,6 +54,8 @@ export type Session = {
   browser: RobotBrowser;
   agent: AgentRunner;
   listeners: Set<(event: RobotEvent) => void>;
+  frameListeners: Set<(frame: string) => void>;
+  screencast?: { stop(): Promise<void> };
 };
 
 export class SessionManager {
@@ -99,6 +107,7 @@ export class SessionManager {
       browser,
       agent,
       listeners: new Set(),
+      frameListeners: new Set(),
     });
 
     return id;
@@ -132,14 +141,33 @@ export class SessionManager {
     session.agent.approve(requestId, approved);
   }
 
-  setPreview(id: string, enabled: boolean): void {
-    this.require(id).previewEnabled = enabled;
+  subscribeFrames(id: string, listener: (frame: string) => void): () => void {
+    const session = this.require(id);
+    session.frameListeners.add(listener);
+    return () => session.frameListeners.delete(listener);
+  }
+
+  async setPreview(id: string, enabled: boolean): Promise<void> {
+    const session = this.require(id);
+    if (enabled === session.previewEnabled) return;
+    session.previewEnabled = enabled;
+
+    if (enabled) {
+      session.screencast = await this.deps.startScreencast(session.browser.page, (frame) => {
+        for (const listener of session.frameListeners) listener(frame);
+      });
+    } else {
+      await session.screencast?.stop().catch(() => {});
+      session.screencast = undefined;
+    }
   }
 
   async stop(id: string): Promise<void> {
     const session = this.sessions.get(id);
     if (!session) return;
     this.sessions.delete(id);
+    await session.screencast?.stop().catch(() => {});
+    session.screencast = undefined;
     this.emit(session, { type: "session_status", status: "stopped" });
     await session.agent.stop().catch(() => {});
     await session.browser.close().catch(() => {});
