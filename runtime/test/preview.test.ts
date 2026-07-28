@@ -28,6 +28,7 @@ function makeDeps() {
       downloadsDir: "/tmp/bp-test-dl",
       page: {} as never,
       context: {} as never,
+      onDownload: () => {},
       close: async () => {},
     }),
     startAgent: async () => ({ send: () => {}, approve: () => {}, stop: async () => {} }),

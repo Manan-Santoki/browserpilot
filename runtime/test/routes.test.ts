@@ -34,6 +34,7 @@ function start() {
       downloadsDir: "/tmp/bp-test-dl",
       page: {} as never,
       context: {} as never,
+      onDownload: () => {},
       close: async () => {},
     }),
     startAgent: async (o) => {

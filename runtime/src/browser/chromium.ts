@@ -1,4 +1,4 @@
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium, type BrowserContext, type Download, type Page } from "playwright";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,11 +12,17 @@ export type LaunchOptions = {
   cookieTtlSeconds?: number;
 };
 
+export type DownloadHandler = (download: {
+  suggestedFilename: string;
+  saveAs: (path: string) => Promise<void>;
+}) => void;
+
 export type RobotBrowser = {
   cdpEndpoint: string;
   downloadsDir: string;
   page: Page;
   context: BrowserContext;
+  onDownload(handler: DownloadHandler): void;
   close(): Promise<void>;
 };
 
@@ -76,6 +82,14 @@ export async function launchRobotBrowser(opts: LaunchOptions): Promise<RobotBrow
     downloadsDir: opts.downloadsDir,
     page,
     context,
+    onDownload(handler: DownloadHandler) {
+      context.on("download", (download: Download) => {
+        handler({
+          suggestedFilename: download.suggestedFilename(),
+          saveAs: (path: string) => download.saveAs(path),
+        });
+      });
+    },
     async close() {
       await context.close();
     },

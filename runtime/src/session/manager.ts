@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { AgentRunner } from "../agent/runner";
 import type { RobotBrowser } from "../browser/chromium";
 import type { JwmUser } from "../auth/mint";
@@ -80,6 +80,25 @@ export class SessionManager {
       user,
       sessionSecret: this.config.sessionSecret,
       downloadsDir,
+    });
+
+    browser.onDownload((download) => {
+      // basename() prevents a hostile suggested filename from escaping the dir.
+      const filename = basename(download.suggestedFilename) || "download";
+      const target = join(downloadsDir, filename);
+      void download
+        .saveAs(target)
+        .then(() => {
+          this.handleEvent(id, {
+            type: "file_ready",
+            fileId: filename,
+            filename,
+            url: `/api/sessions/${id}/files/${encodeURIComponent(filename)}`,
+          });
+        })
+        .catch((error: Error) => {
+          this.handleEvent(id, { type: "error", message: `Download failed: ${error.message}` });
+        });
     });
 
     let agent: AgentRunner;

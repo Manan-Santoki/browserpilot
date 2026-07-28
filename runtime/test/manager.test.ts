@@ -21,6 +21,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
       downloadsDir: "/tmp/x",
       page: {} as never,
       context: {} as never,
+      onDownload: () => {},
       close: async () => {
         closed.browser++;
       },
