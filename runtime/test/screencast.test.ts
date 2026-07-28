@@ -17,16 +17,14 @@ let browser: RobotBrowser;
 let downloadsDir: string;
 
 beforeAll(async () => {
+  // Deliberately static: Chromium only emits screencast frames on repaint, so
+  // this is the case that proves we push an initial frame ourselves.
   server = Bun.serve({
     port: 0,
     fetch: () =>
-      new Response(
-        `<html><body style="background:#c00"><h1>frame</h1>
-         <script>setInterval(() => document.body.style.background =
-           document.body.style.background === 'rgb(204, 0, 0)' ? '#0c0' : '#c00', 100)</script>
-         </body></html>`,
-        { headers: { "content-type": "text/html" } },
-      ),
+      new Response(`<html><body style="background:#c00"><h1>static page</h1></body></html>`, {
+        headers: { "content-type": "text/html" },
+      }),
   });
   downloadsDir = await mkdtemp(join(tmpdir(), "bp-dl-"));
   browser = await launchRobotBrowser({
@@ -49,6 +47,7 @@ describe("startScreencast", () => {
     const handle = await startScreencast(browser.page, (frame) => frames.push(frame));
 
     await Bun.sleep(1500);
+    // A static page repaints never — without an initial frame this is 0.
     expect(frames.length).toBeGreaterThan(0);
 
     // JPEG magic bytes: base64 of 0xFF 0xD8 0xFF always starts with "/9j/"

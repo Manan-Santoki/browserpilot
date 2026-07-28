@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import {
   query,
   type Options,
@@ -10,11 +12,25 @@ import type { RobotEvent } from "../session/events";
 
 export type QueryFn = (params: { prompt: AsyncIterable<never>; options?: Options }) => Query;
 
+/**
+ * Absolute path to the Playwright MCP CLI inside our own node_modules.
+ *
+ * Resolving it ourselves — rather than shelling out to `npx @playwright/mcp` —
+ * keeps session startup offline and deterministic. On a WSL host `npx` can even
+ * resolve to the Windows binary, which cannot read the Linux working directory.
+ */
+export function playwrightMcpCliPath(): string {
+  const require = createRequire(import.meta.url);
+  return join(dirname(require.resolve("@playwright/mcp/package.json")), "cli.js");
+}
+
 export type StartAgentOptions = {
   cdpEndpoint: string;
   jwmUrl: string;
   model: string;
   env: Record<string, string>;
+  /** Node binary used to run the MCP server. Override when it isn't on PATH. */
+  nodeBin?: string;
   onEvent: (event: RobotEvent) => void;
 };
 
@@ -115,13 +131,20 @@ export async function startAgent(
     model: opts.model,
     env: opts.env,
     systemPrompt: buildSystemPrompt(opts.jwmUrl),
+    // The browser is the agent's entire world. Without this the SDK hands it
+    // the full Claude Code toolset — Bash, Read, Write, and filesystem access
+    // to the runtime host, none of which it has any business touching.
+    tools: [],
     strictMcpConfig: true,
     permissionMode: "default",
     mcpServers: {
       playwright: {
         type: "stdio",
-        command: "bunx",
-        args: ["@playwright/mcp@latest", "--cdp-endpoint", opts.cdpEndpoint, "--caps", "pdf"],
+        // node, not bun: playwright's connectOverCDP never completes its
+        // WebSocket handshake under Bun, and MCP responds by quietly starting
+        // its own browser — one with no session cookie and none of our pages.
+        command: opts.nodeBin ?? "node",
+        args: [playwrightMcpCliPath(), "--cdp-endpoint", opts.cdpEndpoint, "--caps", "pdf"],
         alwaysLoad: true,
       },
     },

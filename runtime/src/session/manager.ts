@@ -18,6 +18,7 @@ export type AgentArgs = {
   jwmUrl: string;
   model: string;
   env: Record<string, string>;
+  nodeBin?: string;
   onEvent: (event: RobotEvent) => void;
 };
 
@@ -42,6 +43,7 @@ export type ManagerConfig = {
   idleTimeoutMs: number;
   hardCapMs: number;
   env: Record<string, string>;
+  nodeBin?: string;
 };
 
 export type Session = {
@@ -108,6 +110,7 @@ export class SessionManager {
         jwmUrl: this.config.jwmUrl,
         model: this.config.model,
         env: this.config.env,
+        nodeBin: this.config.nodeBin,
         onEvent: (event) => this.handleEvent(id, event),
       });
     } catch (error) {

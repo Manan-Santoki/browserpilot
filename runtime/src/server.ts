@@ -17,6 +17,7 @@ const manager = new SessionManager(
     idleTimeoutMs: config.idleTimeoutMs,
     hardCapMs: config.hardCapMs,
     env: credentialEnv(config),
+    nodeBin: config.nodeBin,
   },
   {
     now: () => Date.now(),

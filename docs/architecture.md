@@ -84,7 +84,7 @@ Claude Agent SDK running `query()` in streaming-input mode: one long-lived agent
 
 Two things are deliberately constrained:
 
-- **`strictMcpConfig: true`** and no built-in tools. The agent's *entire* capability surface is the Playwright MCP tool set. It cannot read the runtime's filesystem, cannot run shell commands, cannot reach the network except through the browser it was given.
+- **`tools: []`** plus **`strictMcpConfig: true`**. The agent's *entire* capability surface is the Playwright MCP tool set. It cannot read the runtime's filesystem, cannot run shell commands, cannot reach the network except through the browser it was given. The empty `tools` array is load-bearing: omit it and the SDK hands the agent the full Claude Code toolset — Bash, Read, Write — on the runtime host.
 - **`canUseTool`** is the approval gate. Every proposed tool call passes through `classifyToolUse`; anything not on the read-and-interact allowlist — and any click whose target element name matches destructive wording (delete, remove, cancel, void, discard, archive, revoke, reset) — suspends the agent until the phone answers.
 
 The agent reads pages primarily through the **accessibility tree** (`browser_snapshot`), not screenshots. This is faster, an order of magnitude cheaper in tokens, and more reliable for form-filling than pixel-based vision. Screenshots are taken when the user asks to see something, or when structure alone is insufficient.
@@ -93,8 +93,8 @@ The agent reads pages primarily through the **accessibility tree** (`browser_sna
 
 One headless Chromium per session, launched by Playwright with `--remote-debugging-port`. Three consumers attach to that one browser:
 
-1. **Playwright MCP** connects over CDP (`--cdp-endpoint`) and exposes the tools the agent calls.
-2. **The screencast** uses a CDP session on the page to stream JPEG frames for the live preview.
+1. **Playwright MCP** connects over CDP (`--cdp-endpoint`) and exposes the tools the agent calls. It is spawned as `node <resolved @playwright/mcp/cli.js>` — **not** `bunx`/`npx`. Playwright's `connectOverCDP` never completes its WebSocket handshake under Bun, and MCP's response to a failed attach is to quietly launch its own browser: one with no session cookie and none of our pages, so the agent appears to work while operating a logged-out stranger. Resolving the CLI from our own `node_modules` also keeps session startup offline.
+2. **The screencast** uses a CDP session on the page to stream JPEG frames for the live preview. Chromium only emits a frame when the page repaints, so the runtime pushes one captured frame at start — otherwise opening the preview on an idle page shows nothing at all.
 3. **The download hook** captures files the agent downloads into a per-session directory.
 
 The session's cookie is injected into the browser context *before* the first navigation, so the very first page load is already authenticated.

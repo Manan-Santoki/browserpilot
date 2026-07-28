@@ -11,6 +11,7 @@ export type RuntimeConfig = {
   maxConcurrentSessions: number;
   idleTimeoutMs: number;
   hardCapMs: number;
+  nodeBin: string;
   aiCredential: AiCredential;
 };
 
@@ -46,6 +47,7 @@ export function loadConfig(env: Record<string, string | undefined>): RuntimeConf
     maxConcurrentSessions: num(env, "BP_MAX_SESSIONS", 2),
     idleTimeoutMs: num(env, "BP_IDLE_TIMEOUT_MS", 600_000),
     hardCapMs: num(env, "BP_HARD_CAP_MS", 3_600_000),
+    nodeBin: env.BP_NODE_BIN?.trim() || "node",
     aiCredential: readCredential(env),
   };
 }

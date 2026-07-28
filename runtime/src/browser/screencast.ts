@@ -25,13 +25,28 @@ export async function startScreencast(
     client.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => {});
   });
 
+  const quality = opts.quality ?? 60;
+
   await client.send("Page.startScreencast", {
     format: "jpeg",
-    quality: opts.quality ?? 60,
+    quality,
     maxWidth: opts.maxWidth ?? 900,
     maxHeight: opts.maxHeight ?? 1600,
     everyNthFrame: opts.everyNthFrame ?? 2,
   });
+
+  // Chromium only emits screencast frames when the page repaints, so a page
+  // that is merely sitting there would leave the viewer staring at nothing
+  // until the agent's next action. Push the current state immediately.
+  try {
+    const shot = (await client.send("Page.captureScreenshot", {
+      format: "jpeg",
+      quality,
+    })) as { data: string };
+    if (!stopped) onFrame(shot.data);
+  } catch {
+    // A frame from a repaint will arrive instead; not worth failing the start.
+  }
 
   return {
     async stop() {

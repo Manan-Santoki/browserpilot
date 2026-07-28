@@ -89,10 +89,22 @@ describe("startAgent", () => {
     const fake = fakeQuery();
     const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
 
-    const mcp = fake.captured.options!.mcpServers as Record<string, { args: string[] }>;
+    const mcp = fake.captured.options!.mcpServers as Record<
+      string,
+      { command: string; args: string[] }
+    >;
     expect(mcp.playwright!.args).toContain("--cdp-endpoint");
     expect(mcp.playwright!.args).toContain(OPTS.cdpEndpoint);
+    // Must run under node: playwright's connectOverCDP hangs under Bun, which
+    // makes MCP silently fall back to its own browser with no session cookie.
+    expect(mcp.playwright!.command).toBe("node");
+    // Resolved from our own node_modules — never npx, which on some machines
+    // resolves to a different platform's binary and needs a network fetch.
+    expect(mcp.playwright!.args[0]).toMatch(/@playwright[/\\]mcp[/\\]cli\.js$/);
+    expect(mcp.playwright!.args).not.toContain("-y");
     expect(fake.captured.options!.strictMcpConfig).toBe(true);
+    // No built-in Claude Code tools: the browser is the agent's whole world.
+    expect(fake.captured.options!.tools).toEqual([]);
     expect(fake.captured.options!.model).toBe("claude-opus-5");
     expect(fake.captured.options!.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "t" });
 
