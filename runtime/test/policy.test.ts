@@ -56,4 +56,31 @@ describe("classifyToolUse", () => {
     expect(classifyToolUse("mcp__playwright__browser_click", {})).toBe("auto");
     expect(classifyToolUse("mcp__playwright__browser_click", { element: 42 })).toBe("auto");
   });
+
+  test("a site can supply its own destructive vocabulary", () => {
+    const words = ["scrap", "supersede"];
+    expect(
+      classifyToolUse("mcp__playwright__browser_click", { element: "Scrap this batch" }, words),
+    ).toBe("approve");
+    // Its list replaces the default rather than extending it, so a word the
+    // site considers routine stops blocking.
+    expect(
+      classifyToolUse("mcp__playwright__browser_click", { element: "Archive record" }, words),
+    ).toBe("auto");
+  });
+
+  test("an empty site list falls back to the defaults", () => {
+    expect(
+      classifyToolUse("mcp__playwright__browser_click", { element: "Delete row" }, []),
+    ).toBe("approve");
+  });
+
+  test("regex characters in a site word cannot break the matcher", () => {
+    expect(
+      classifyToolUse("mcp__playwright__browser_click", { element: "a.b" }, ["a.b"]),
+    ).toBe("approve");
+    expect(
+      classifyToolUse("mcp__playwright__browser_click", { element: "axb" }, ["a.b"]),
+    ).toBe("auto");
+  });
 });

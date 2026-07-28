@@ -1,89 +1,92 @@
-import { describe, expect, test } from "bun:test";
-import { SessionManager, type ManagerDeps } from "../src/session/manager";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { SessionManager } from "../src/session/manager";
 import type { RobotEvent } from "../src/session/events";
+import { createFixtures, fakeDeps, managerConfig, type Fixtures } from "./helpers";
 
-const USER = {
-  userId: "3f7c1a52-9d4e-4b1a-8f2c-1a2b3c4d5e6f",
-  email: "owner@jwm.test",
-  role: "admin",
-  name: "Manan Santoki",
-};
+let fx: Fixtures;
 
-const config = {
-  jwmUrl: "https://jwm.example.com",
-  sessionSecret: "s",
-  downloadsRoot: "/tmp/bp-test-dl",
-  model: "claude-opus-5",
-  maxConcurrentSessions: 2,
-  idleTimeoutMs: 600_000,
-  hardCapMs: 3_600_000,
-  env: {},
-};
+beforeAll(async () => {
+  fx = await createFixtures("downloads");
+});
 
-function makeDeps() {
-  const state = {
-    fire: undefined as
-      | ((d: { suggestedFilename: string; saveAs: (p: string) => Promise<void> }) => void)
-      | undefined,
-    savedTo: [] as string[],
-  };
-
-  const deps: ManagerDeps = {
-    now: () => Date.now(),
-    startAgent: async () => ({ send: () => {}, approve: () => {}, stop: async () => {} }),
-    startScreencast: async () => ({ stop: async () => {} }),
-    launchBrowser: async (args) => ({
-      cdpEndpoint: "http://127.0.0.1:1",
-      downloadsDir: args.downloadsDir,
-      page: {} as never,
-      context: {} as never,
-      close: async () => {},
-      onDownload: (handler) => {
-        state.fire = handler;
-      },
-    }),
-  };
-
-  return { deps, state };
-}
+afterAll(async () => {
+  await fx.cleanup();
+});
 
 describe("downloads", () => {
-  test("a completed download emits file_ready with a fetchable URL", async () => {
-    const { deps, state } = makeDeps();
-    const manager = new SessionManager(config, deps);
-    const id = await manager.create(USER);
+  test("a completed download is announced with a fetchable URL", async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
 
     const events: RobotEvent[] = [];
     manager.subscribe(id, (e) => events.push(e));
 
-    state.fire!({
+    const saved: string[] = [];
+    state.fireDownload!({
       suggestedFilename: "PO-2026-0142.pdf",
       saveAs: async (path) => {
-        state.savedTo.push(path);
+        saved.push(path);
       },
     });
-    await Bun.sleep(20);
+    await Bun.sleep(50);
 
-    const ready = events.find((e) => e.type === "file_ready");
-    expect(ready).toMatchObject({
+    expect(events.find((e) => e.type === "file_ready")).toMatchObject({
       type: "file_ready",
       filename: "PO-2026-0142.pdf",
       url: `/api/sessions/${id}/files/PO-2026-0142.pdf`,
     });
-    expect(state.savedTo[0]).toContain("PO-2026-0142.pdf");
+    expect(saved[0]).toContain("PO-2026-0142.pdf");
+
+    await manager.stop(id);
   });
 
   test("a filename containing path separators is flattened before saving", async () => {
-    const { deps, state } = makeDeps();
-    const manager = new SessionManager(config, deps);
-    const id = await manager.create(USER);
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
     const events: RobotEvent[] = [];
     manager.subscribe(id, (e) => events.push(e));
 
-    state.fire!({ suggestedFilename: "../../etc/passwd", saveAs: async () => {} });
-    await Bun.sleep(20);
+    const saved: string[] = [];
+    state.fireDownload!({
+      suggestedFilename: "../../etc/passwd",
+      saveAs: async (path) => {
+        saved.push(path);
+      },
+    });
+    await Bun.sleep(50);
 
-    const ready = events.find((e) => e.type === "file_ready");
-    expect(ready).toMatchObject({ filename: "passwd" });
+    expect(events.find((e) => e.type === "file_ready")).toMatchObject({ filename: "passwd" });
+    // The written path must stay inside the session's own directory.
+    expect(saved[0]).toContain(`/${id}/passwd`);
+    expect(saved[0]).not.toContain("..");
+
+    await manager.stop(id);
+  });
+
+  test("a failed save surfaces as an error rather than silence", async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    const events: RobotEvent[] = [];
+    manager.subscribe(id, (e) => events.push(e));
+
+    state.fireDownload!({
+      suggestedFilename: "report.pdf",
+      saveAs: async () => {
+        throw new Error("disk full");
+      },
+    });
+    await Bun.sleep(50);
+
+    expect(events.find((e) => e.type === "error")).toMatchObject({
+      type: "error",
+      message: expect.stringContaining("disk full"),
+    });
+
+    await manager.stop(id);
   });
 });

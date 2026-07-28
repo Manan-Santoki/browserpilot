@@ -109,6 +109,34 @@ export const siteProfiles = pgTable(
   (t) => [uniqueIndex("site_profiles_name_key").on(t.name)],
 );
 
+/**
+ * Which identity a given BrowserPilot user assumes on a given target site.
+ *
+ * BrowserPilot's own user id means nothing to the target application, so
+ * cookie-mint needs the account details the target expects. Keeping this per
+ * (user, site) rather than on the site itself preserves attribution: the
+ * target's own audit trail shows the real person, not a shared robot account.
+ */
+export const siteAccounts = pgTable(
+  "site_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    siteProfileId: uuid("site_profile_id")
+      .notNull()
+      .references(() => siteProfiles.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The identifier the target site uses — typically its own user UUID. */
+    targetUserId: text("target_user_id").notNull(),
+    targetEmail: text("target_email").notNull(),
+    targetName: text("target_name").notNull(),
+    targetRole: text("target_role").notNull().default("user"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("site_accounts_site_user_key").on(t.siteProfileId, t.userId)],
+);
+
 /** One robot browser session. Written by the runtime, read by the console. */
 export const robotSessions = pgTable(
   "robot_sessions",

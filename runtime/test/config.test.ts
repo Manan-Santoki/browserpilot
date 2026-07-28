@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { credentialEnv, loadConfig } from "../src/config";
 
 const base = {
-  BP_JWM_URL: "https://jwm.example.com",
-  SESSION_SECRET: "s3cret-value",
+  DATABASE_URL: "postgresql://user:pass@localhost:5432/browserpilot",
+  BP_MASTER_KEY: "m".repeat(44),
+  BP_TICKET_SECRET: "t".repeat(44),
   CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
 };
 
@@ -11,29 +12,35 @@ describe("loadConfig", () => {
   test("applies defaults", () => {
     const cfg = loadConfig(base);
     expect(cfg.port).toBe(8787);
-    expect(cfg.jwmUrl).toBe("https://jwm.example.com");
-    expect(cfg.maxConcurrentSessions).toBe(2);
-    expect(cfg.idleTimeoutMs).toBe(600_000);
-    expect(cfg.hardCapMs).toBe(3_600_000);
     expect(cfg.model).toBe("claude-opus-5");
+    expect(cfg.nodeBin).toBe("node");
+    expect(cfg.downloadsRoot).toBe("./downloads");
     expect(cfg.aiCredential).toEqual({ kind: "oauth", value: "oauth-token" });
   });
 
-  test("strips a trailing slash from jwmUrl", () => {
-    expect(loadConfig({ ...base, BP_JWM_URL: "https://jwm.example.com/" }).jwmUrl).toBe(
-      "https://jwm.example.com",
-    );
+  test("carries the database and secrets through", () => {
+    const cfg = loadConfig(base);
+    expect(cfg.databaseUrl).toBe(base.DATABASE_URL);
+    expect(cfg.masterKey).toBe(base.BP_MASTER_KEY);
+    expect(cfg.ticketSecret).toBe(base.BP_TICKET_SECRET);
+  });
+
+  test("no longer accepts a hardcoded target — sites come from the database", () => {
+    const cfg = loadConfig({ ...base, BP_JWM_URL: "https://jwm.example.com" });
+    expect(cfg).not.toHaveProperty("jwmUrl");
+    expect(JSON.stringify(cfg)).not.toContain("jwm.example.com");
   });
 
   test("prefers the OAuth token when both credentials are set", () => {
-    const cfg = loadConfig({ ...base, ANTHROPIC_API_KEY: "sk-ant-xxx" });
-    expect(cfg.aiCredential.kind).toBe("oauth");
+    expect(loadConfig({ ...base, ANTHROPIC_API_KEY: "sk-ant-xxx" }).aiCredential.kind).toBe("oauth");
   });
 
   test("falls back to the API key", () => {
     const { CLAUDE_CODE_OAUTH_TOKEN: _drop, ...noOauth } = base;
-    const cfg = loadConfig({ ...noOauth, ANTHROPIC_API_KEY: "sk-ant-xxx" });
-    expect(cfg.aiCredential).toEqual({ kind: "apiKey", value: "sk-ant-xxx" });
+    expect(loadConfig({ ...noOauth, ANTHROPIC_API_KEY: "sk-ant-xxx" }).aiCredential).toEqual({
+      kind: "apiKey",
+      value: "sk-ant-xxx",
+    });
   });
 
   test("throws when no AI credential is set", () => {
@@ -41,28 +48,30 @@ describe("loadConfig", () => {
     expect(() => loadConfig(noCred)).toThrow(/CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY/);
   });
 
-  test("throws when SESSION_SECRET is missing", () => {
-    const { SESSION_SECRET: _drop, ...noSecret } = base;
-    expect(() => loadConfig(noSecret)).toThrow(/SESSION_SECRET/);
+  test("throws when DATABASE_URL is missing", () => {
+    const { DATABASE_URL: _drop, ...noDb } = base;
+    expect(() => loadConfig(noDb)).toThrow(/DATABASE_URL/);
   });
 
-  test("throws when BP_JWM_URL is missing", () => {
-    const { BP_JWM_URL: _drop, ...noUrl } = base;
-    expect(() => loadConfig(noUrl)).toThrow(/BP_JWM_URL/);
+  test("throws when the ticket secret is missing", () => {
+    const { BP_TICKET_SECRET: _drop, ...noTicket } = base;
+    expect(() => loadConfig(noTicket)).toThrow(/BP_TICKET_SECRET/);
   });
 
-  test("numeric overrides are parsed", () => {
-    const cfg = loadConfig({ ...base, BP_PORT: "9000", BP_MAX_SESSIONS: "5" });
+  test("rejects a master key too short to encrypt with", () => {
+    expect(() => loadConfig({ ...base, BP_MASTER_KEY: "short" })).toThrow(/at least 32/i);
+  });
+
+  test("numeric and path overrides are honoured", () => {
+    const cfg = loadConfig({ ...base, BP_PORT: "9000", BP_NODE_BIN: "/usr/bin/node" });
     expect(cfg.port).toBe(9000);
-    expect(cfg.maxConcurrentSessions).toBe(5);
+    expect(cfg.nodeBin).toBe("/usr/bin/node");
   });
 });
 
 describe("credentialEnv", () => {
   test("maps an oauth credential to the SDK env var", () => {
-    expect(credentialEnv(loadConfig(base))).toEqual({
-      CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
-    });
+    expect(credentialEnv(loadConfig(base))).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth-token" });
   });
 
   test("maps an api key credential to the SDK env var", () => {
