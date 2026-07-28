@@ -21,6 +21,7 @@ export type TargetSite = {
   name: string;
   baseUrl: string;
   loginStrategy: "cookie_mint" | "persistent_profile" | "manual_login";
+  cookieName: string;
   /** Decrypted only in memory, only when a session starts. */
   secret: string | null;
   systemPromptNotes: string | null;
@@ -74,6 +75,7 @@ export class Store {
       name: row.name,
       baseUrl: row.baseUrl,
       loginStrategy: row.loginStrategy,
+      cookieName: row.cookieName,
       secret: row.secretEncrypted ? decryptSecret(row.secretEncrypted, this.masterKey) : null,
       systemPromptNotes: row.systemPromptNotes,
       destructivePatterns: row.destructivePatterns,

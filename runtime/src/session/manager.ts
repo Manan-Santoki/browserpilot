@@ -9,6 +9,7 @@ export type LaunchArgs = {
   targetUrl: string;
   user: { userId: string; email: string; role: string; name: string };
   sessionSecret: string;
+  cookieName: string;
   downloadsDir: string;
 };
 
@@ -140,6 +141,7 @@ export class SessionManager {
           role: account.targetRole,
         },
         sessionSecret: site.secret ?? "",
+        cookieName: site.cookieName,
         downloadsDir,
       });
     } catch (error) {

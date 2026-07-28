@@ -22,7 +22,7 @@ beforeAll(async () => {
     port: 0,
     fetch(req) {
       const cookie = req.headers.get("cookie") ?? "";
-      const token = /jwm-session=([^;]+)/.exec(cookie)?.[1] ?? "";
+      const token = /target-session=([^;]+)/.exec(cookie)?.[1] ?? "";
       return new Response(
         `<html><body><h1 id="who">${token ? "authed" : "anon"}</h1><pre id="token">${token}</pre></body></html>`,
         { headers: { "content-type": "text/html" } },
@@ -34,6 +34,7 @@ beforeAll(async () => {
     targetUrl: `http://127.0.0.1:${server.port}`,
     user: USER,
     sessionSecret: SECRET,
+    cookieName: "target-session",
     downloadsDir,
   });
 }, 60_000);

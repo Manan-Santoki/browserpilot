@@ -20,6 +20,7 @@ const SITE = {
   name: "Example ERP",
   baseUrl: "https://target.example.com",
   loginStrategy: "cookie_mint" as const,
+  cookieName: "target-session",
   secret: "sekret",
   systemPromptNotes: "Purchase orders live at /purchase-orders.",
   destructivePatterns: null,

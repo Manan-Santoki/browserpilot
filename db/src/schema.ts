@@ -98,6 +98,8 @@ export const siteProfiles = pgTable(
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
     loginStrategy: loginStrategy("login_strategy").notNull().default("cookie_mint"),
+    /** Session cookie name the target application reads. */
+    cookieName: text("cookie_name").notNull().default("session"),
     secretEncrypted: text("secret_encrypted"),
     systemPromptNotes: text("system_prompt_notes"),
     destructivePatterns: jsonb("destructive_patterns").$type<string[]>(),

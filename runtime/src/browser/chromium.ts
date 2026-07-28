@@ -2,12 +2,14 @@ import { chromium, type BrowserContext, type Download, type Page } from "playwri
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mintRobotCookie, ROBOT_COOKIE_NAME, type JwmUser } from "../auth/mint";
+import { mintRobotCookie, type TargetUser } from "../auth/mint";
 
 export type LaunchOptions = {
   targetUrl: string;
-  user: JwmUser;
+  user: TargetUser;
   sessionSecret: string;
+  /** Cookie name the target reads — a property of the site, not of us. */
+  cookieName: string;
   downloadsDir: string;
   cookieTtlSeconds?: number;
 };
@@ -66,7 +68,7 @@ export async function launchRobotBrowser(opts: LaunchOptions): Promise<RobotBrow
   const token = await mintRobotCookie(opts.user, opts.sessionSecret, opts.cookieTtlSeconds);
   await context.addCookies([
     {
-      name: ROBOT_COOKIE_NAME,
+      name: opts.cookieName,
       value: token,
       url: opts.targetUrl,
       httpOnly: true,
