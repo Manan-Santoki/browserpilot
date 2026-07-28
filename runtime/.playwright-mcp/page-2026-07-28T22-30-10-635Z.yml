@@ -1,0 +1,439 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - complementary [ref=f1e3]:
+      - generic [ref=f1e5]:
+        - generic [ref=f1e6]:
+          - generic [ref=f1e7]: JWM Inventory
+          - generic [ref=f1e8]: v2.15
+        - button "Collapse sidebar" [ref=f1e9]
+      - navigation [ref=f1e11]:
+        - link "Dashboard" [ref=f1e12] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=f1e19]:
+          - paragraph [ref=f1e20]: Purchase
+          - link "Purchase Orders" [ref=f1e21] [cursor=pointer]:
+            - /url: /purchase-orders
+          - link "Inventory" [ref=f1e27] [cursor=pointer]:
+            - /url: /inventory
+        - generic [ref=f1e33]:
+          - paragraph [ref=f1e34]: Production
+          - link "Programs" [ref=f1e35] [cursor=pointer]:
+            - /url: /programs
+          - link "Planning" [ref=f1e48] [cursor=pointer]:
+            - /url: /production-planning
+          - link "Warping" [ref=f1e53] [cursor=pointer]:
+            - /url: /warping
+          - link "Roll Entry" [ref=f1e59] [cursor=pointer]:
+            - /url: /roll-entry
+          - link "FG Inventory" [ref=f1e64] [cursor=pointer]:
+            - /url: /fg-inventory
+          - link "Scrap" [ref=f1e76] [cursor=pointer]:
+            - /url: /scrap
+        - generic [ref=f1e81]:
+          - paragraph [ref=f1e82]: Sales
+          - link "Revenue" [ref=f1e83] [cursor=pointer]:
+            - /url: /revenue
+          - link "New Sales" [ref=f1e88] [cursor=pointer]:
+            - /url: /sales/new
+          - link "Enquiries" [ref=f1e92] [cursor=pointer]:
+            - /url: /enquiries
+          - link "Orders" [ref=f1e97] [cursor=pointer]:
+            - /url: /orders
+          - link "Dispatch" [ref=f1e103] [cursor=pointer]:
+            - /url: /dispatch
+          - link "Wiremesh Costing" [ref=f1e110] [cursor=pointer]:
+            - /url: /costing
+        - generic [ref=f1e114]:
+          - paragraph [ref=f1e115]: Master Data
+          - link "Min Inventory" [ref=f1e116] [cursor=pointer]:
+            - /url: /min-inventory
+          - link "Suppliers" [ref=f1e122] [cursor=pointer]:
+            - /url: /suppliers
+          - link "Customers" [ref=f1e128] [cursor=pointer]:
+            - /url: /customers
+          - link "Machines" [ref=f1e135] [cursor=pointer]:
+            - /url: /machines
+        - generic [ref=f1e139]:
+          - paragraph [ref=f1e140]: Tools
+          - link "Reports" [ref=f1e141] [cursor=pointer]:
+            - /url: /reports
+          - link "AI Workspace" [ref=f1e145] [cursor=pointer]:
+            - /url: /ai
+          - link "Feedback" [ref=f1e150] [cursor=pointer]:
+            - /url: /feedback
+          - link "WhatsApp" [ref=f1e275] [cursor=pointer]:
+            - /url: /whatsapp
+        - generic [ref=f1e279]:
+          - paragraph [ref=f1e280]: Admin
+          - link "Users" [ref=f1e281] [cursor=pointer]:
+            - /url: /admin/users
+          - link "Logs" [ref=f1e288] [cursor=pointer]:
+            - /url: /admin/logs
+          - link "System" [ref=f1e293] [cursor=pointer]:
+            - /url: /admin/system
+          - link "Mobile App" [ref=f1e298] [cursor=pointer]:
+            - /url: /admin/mobile-app
+          - link "Landing Site" [ref=f1e302] [cursor=pointer]:
+            - /url: /admin/landing-content
+        - link "Developer" [ref=f1e307] [cursor=pointer]:
+          - /url: /developer
+    - generic [ref=f1e154]:
+      - banner [ref=f1e155]:
+        - generic [ref=f1e156]:
+          - combobox [ref=f1e160]:
+            - generic [ref=f1e161]: en
+            - img: ▼
+          - textbox [ref=f1e162]: en
+        - button "Toggle theme" [active] [ref=f1e163]
+        - button "Notifications" [ref=f1e311]:
+          - generic [ref=f1e315]: "78"
+        - button "Manan Manan DEVELOPER" [ref=f1e316]:
+          - img "Manan" [ref=f1e318]
+          - generic [ref=f1e319]:
+            - generic [ref=f1e320]: Manan
+            - generic [ref=f1e321]: DEVELOPER
+      - main [ref=f1e164]:
+        - generic [ref=f1e323]:
+          - generic [ref=f1e324]:
+            - generic [ref=f1e325]:
+              - heading "Dashboard" [level=1] [ref=f1e326]
+              - paragraph [ref=f1e327]: Operations overview for procurement, production and dispatch.
+            - button "Refresh" [ref=f1e329]
+          - generic [ref=f1e330]:
+            - generic [ref=f1e331]:
+              - generic [ref=f1e332]: Purchase Orders
+              - generic [ref=f1e335]:
+                - paragraph [ref=f1e336]: "44"
+                - paragraph [ref=f1e337]: 9 active
+            - generic [ref=f1e343]:
+              - generic [ref=f1e344]: Active Programs
+              - generic [ref=f1e347]:
+                - paragraph [ref=f1e348]: "27"
+                - paragraph [ref=f1e349]: 10 running, 17 planning
+            - generic [ref=f1e353]:
+              - generic [ref=f1e354]: Wire Inventory
+              - generic [ref=f1e357]:
+                - paragraph [ref=f1e358]: "64"
+                - paragraph [ref=f1e359]: 14 low-stock batches
+            - generic [ref=f1e365]:
+              - generic [ref=f1e366]: Open Enquiries
+              - generic [ref=f1e369]:
+                - paragraph [ref=f1e370]: "88"
+                - paragraph [ref=f1e371]: 232 records total
+            - generic [ref=f1e376]:
+              - generic [ref=f1e377]:
+                - generic [ref=f1e378]: Raw Material Worth
+                - button [ref=f1e380]
+              - generic [ref=f1e382]:
+                - paragraph [ref=f1e383]: ₹ ******
+                - paragraph [ref=f1e384]: 16,529.8 kg available
+            - generic [ref=f1e389]:
+              - generic [ref=f1e390]:
+                - generic [ref=f1e391]: Finished Goods Worth
+                - generic [ref=f1e393]:
+                  - button "Rolls with no value" [ref=f1e394]
+                  - button [ref=f1e395]
+              - generic [ref=f1e397]:
+                - paragraph [ref=f1e398]: ₹ ******
+                - paragraph [ref=f1e399]: 396 of 433 FG/TR rolls valued on wire cost or diameter rates
+            - generic [ref=f1e404]:
+              - generic [ref=f1e405]: Total Production
+              - generic [ref=f1e408]:
+                - paragraph [ref=f1e409]: 29,330m
+                - paragraph [ref=f1e410]: 38,257 kg total weight
+            - generic [ref=f1e415]:
+              - generic [ref=f1e416]: Dispatches
+              - generic [ref=f1e419]:
+                - paragraph [ref=f1e420]: "205"
+                - paragraph [ref=f1e421]: 57 this month
+          - generic [ref=f1e428]:
+            - generic [ref=f1e429]:
+              - generic [ref=f1e430]:
+                - generic [ref=f1e431]:
+                  - generic [ref=f1e432]: Running Machines
+                  - generic [ref=f1e433]: Machines with programs currently in warping.
+                - link "View all" [ref=f1e435] [cursor=pointer]:
+                  - /url: /programs
+              - generic [ref=f1e437]:
+                - link "1.65 MTR WIDTH MACHINE 03 - JWM-03/26-27/009 TWILL - Updated 27 Jul 2026, 03:50 Running" [ref=f1e438] [cursor=pointer]:
+                  - /url: /programs/034f525a-5f97-4271-8515-328c8aba5d79
+                  - generic [ref=f1e439]:
+                    - generic [ref=f1e440]:
+                      - paragraph [ref=f1e441]: 1.65 MTR WIDTH MACHINE
+                      - paragraph [ref=f1e442]: 03 - JWM-03/26-27/009
+                      - paragraph [ref=f1e443]: TWILL - Updated 27 Jul 2026, 03:50
+                    - generic [ref=f1e444]: Running
+                - link "1.63 MTR WIDTH MACHINE 04 - JWM-04/26-27/015 PLAIN - Updated 26 Jul 2026, 22:18 Running" [ref=f1e445] [cursor=pointer]:
+                  - /url: /programs/47902646-c6a5-4686-9e36-a3e8b5408578
+                  - generic [ref=f1e446]:
+                    - generic [ref=f1e447]:
+                      - paragraph [ref=f1e448]: 1.63 MTR WIDTH MACHINE
+                      - paragraph [ref=f1e449]: 04 - JWM-04/26-27/015
+                      - paragraph [ref=f1e450]: PLAIN - Updated 26 Jul 2026, 22:18
+                    - generic [ref=f1e451]: Running
+                - link "1.30 MTR WIDTH MACHINE 01 - JWM-01/26-27/004 TWILL - Updated 23 Jul 2026, 22:04 Running" [ref=f1e452] [cursor=pointer]:
+                  - /url: /programs/4c6f1401-c05a-47c8-97e9-cdea21a2e5ea
+                  - generic [ref=f1e453]:
+                    - generic [ref=f1e454]:
+                      - paragraph [ref=f1e455]: 1.30 MTR WIDTH MACHINE
+                      - paragraph [ref=f1e456]: 01 - JWM-01/26-27/004
+                      - paragraph [ref=f1e457]: TWILL - Updated 23 Jul 2026, 22:04
+                    - generic [ref=f1e458]: Running
+                - link "1.63 MTR WIDTH MACHINE 05 - JWM-05/26-27/010 PLAIN DUTCH - Updated 21 Jul 2026, 03:59 Running" [ref=f1e459] [cursor=pointer]:
+                  - /url: /programs/1b0fdf4a-f7d7-4818-b834-7f585b351ecc
+                  - generic [ref=f1e460]:
+                    - generic [ref=f1e461]:
+                      - paragraph [ref=f1e462]: 1.63 MTR WIDTH MACHINE
+                      - paragraph [ref=f1e463]: 05 - JWM-05/26-27/010
+                      - paragraph [ref=f1e464]: PLAIN DUTCH - Updated 21 Jul 2026, 03:59
+                    - generic [ref=f1e465]: Running
+                - link "2.2.0 MTR WIDTH MACHINE 07 - JWM-07/26-27/019 PLAIN - Updated 19 Jul 2026, 23:31 Running" [ref=f1e466] [cursor=pointer]:
+                  - /url: /programs/5720c90d-4697-4657-9d5c-a6589a43e578
+                  - generic [ref=f1e467]:
+                    - generic [ref=f1e468]:
+                      - paragraph [ref=f1e469]: 2.2.0 MTR WIDTH MACHINE
+                      - paragraph [ref=f1e470]: 07 - JWM-07/26-27/019
+                      - paragraph [ref=f1e471]: PLAIN - Updated 19 Jul 2026, 23:31
+                    - generic [ref=f1e472]: Running
+                - link "Trading TR - JWM-TR/26-27 TRADING - Updated 15 Jul 2026, 23:02 Running" [ref=f1e473] [cursor=pointer]:
+                  - /url: /programs/12dd9a4e-7788-4e9a-b3fa-e2bf348df9d9
+                  - generic [ref=f1e474]:
+                    - generic [ref=f1e475]:
+                      - paragraph [ref=f1e476]: Trading
+                      - paragraph [ref=f1e477]: TR - JWM-TR/26-27
+                      - paragraph [ref=f1e478]: TRADING - Updated 15 Jul 2026, 23:02
+                    - generic [ref=f1e479]: Running
+            - generic [ref=f1e480]:
+              - generic [ref=f1e481]:
+                - generic [ref=f1e482]:
+                  - generic [ref=f1e483]: Recent Purchase Orders
+                  - generic [ref=f1e484]: Latest purchase orders with supplier and status.
+                - link "View all" [ref=f1e486] [cursor=pointer]:
+                  - /url: /purchase-orders
+              - generic [ref=f1e488]:
+                - link "JW-PMPL-009/26-27 PRASUM METALS PRIVATE LIMITED 1 items - 28 Jul 2026 PENDING" [ref=f1e489] [cursor=pointer]:
+                  - /url: /purchase-orders/9cf18dd3-dcaf-448b-a6f6-063d713b8aa6
+                  - generic [ref=f1e490]:
+                    - generic [ref=f1e491]:
+                      - paragraph [ref=f1e492]: JW-PMPL-009/26-27
+                      - paragraph [ref=f1e493]: PRASUM METALS PRIVATE LIMITED
+                      - paragraph [ref=f1e494]: 1 items - 28 Jul 2026
+                    - generic [ref=f1e495]: PENDING
+                - link "JW-BWIL-009/26-27 BANSAL WIRE INDUSTRIES LTD 1 items - 28 Jul 2026 PENDING" [ref=f1e496] [cursor=pointer]:
+                  - /url: /purchase-orders/09db9bed-bda4-496e-915b-546df4de229d
+                  - generic [ref=f1e497]:
+                    - generic [ref=f1e498]:
+                      - paragraph [ref=f1e499]: JW-BWIL-009/26-27
+                      - paragraph [ref=f1e500]: BANSAL WIRE INDUSTRIES LTD
+                      - paragraph [ref=f1e501]: 1 items - 28 Jul 2026
+                    - generic [ref=f1e502]: PENDING
+                - link "JW-KIL-007/26-27 KEI INDUSTRIES LIMITED 2 items - 28 Jul 2026 PENDING" [ref=f1e503] [cursor=pointer]:
+                  - /url: /purchase-orders/77278a26-912f-4e8a-b8eb-b0d62872de0a
+                  - generic [ref=f1e504]:
+                    - generic [ref=f1e505]:
+                      - paragraph [ref=f1e506]: JW-KIL-007/26-27
+                      - paragraph [ref=f1e507]: KEI INDUSTRIES LIMITED
+                      - paragraph [ref=f1e508]: 2 items - 28 Jul 2026
+                    - generic [ref=f1e509]: PENDING
+                - link "JW-KIL-006/26-27 KEI INDUSTRIES LIMITED 2 items - 25 Jul 2026 PENDING" [ref=f1e510] [cursor=pointer]:
+                  - /url: /purchase-orders/ba551975-c1bd-4e0c-b306-c3c7bd9bdc7e
+                  - generic [ref=f1e511]:
+                    - generic [ref=f1e512]:
+                      - paragraph [ref=f1e513]: JW-KIL-006/26-27
+                      - paragraph [ref=f1e514]: KEI INDUSTRIES LIMITED
+                      - paragraph [ref=f1e515]: 2 items - 25 Jul 2026
+                    - generic [ref=f1e516]: PENDING
+                - link "JW-PMPL-008/26-27 PRASUM METALS PRIVATE LIMITED 1 items - 24 Jul 2026 PENDING" [ref=f1e517] [cursor=pointer]:
+                  - /url: /purchase-orders/18c60f58-421d-42c2-859c-87797930e771
+                  - generic [ref=f1e518]:
+                    - generic [ref=f1e519]:
+                      - paragraph [ref=f1e520]: JW-PMPL-008/26-27
+                      - paragraph [ref=f1e521]: PRASUM METALS PRIVATE LIMITED
+                      - paragraph [ref=f1e522]: 1 items - 24 Jul 2026
+                    - generic [ref=f1e523]: PENDING
+            - generic [ref=f1e524]:
+              - generic [ref=f1e525]:
+                - generic [ref=f1e526]:
+                  - generic [ref=f1e527]: Recent Rolls
+                  - generic [ref=f1e528]: Newest rolls entered across finished and trading stock.
+                - link "View all" [ref=f1e530] [cursor=pointer]:
+                  - /url: /fg-inventory
+              - generic [ref=f1e532]:
+                - link "JWM-07/26-27/019-R11 JWM-07/26-27/019 27 Jul 2026, 17:00 FG 30.2m x 1.8m 49.1 kg" [ref=f1e533] [cursor=pointer]:
+                  - /url: /programs/5720c90d-4697-4657-9d5c-a6589a43e578
+                  - generic [ref=f1e534]:
+                    - generic [ref=f1e535]:
+                      - paragraph [ref=f1e536]: JWM-07/26-27/019-R11
+                      - paragraph [ref=f1e537]: JWM-07/26-27/019
+                      - paragraph [ref=f1e538]: 27 Jul 2026, 17:00
+                    - generic [ref=f1e539]:
+                      - generic [ref=f1e540]: FG
+                      - paragraph [ref=f1e541]: 30.2m x 1.8m
+                      - paragraph [ref=f1e542]: 49.1 kg
+                - link "JWM-04/26-27/015-R1 JWM-04/26-27/015 27 Jul 2026, 17:00 FG 31.6m x 1m 33.7 kg" [ref=f1e543] [cursor=pointer]:
+                  - /url: /programs/47902646-c6a5-4686-9e36-a3e8b5408578
+                  - generic [ref=f1e544]:
+                    - generic [ref=f1e545]:
+                      - paragraph [ref=f1e546]: JWM-04/26-27/015-R1
+                      - paragraph [ref=f1e547]: JWM-04/26-27/015
+                      - paragraph [ref=f1e548]: 27 Jul 2026, 17:00
+                    - generic [ref=f1e549]:
+                      - generic [ref=f1e550]: FG
+                      - paragraph [ref=f1e551]: 31.6m x 1m
+                      - paragraph [ref=f1e552]: 33.7 kg
+                - link "JWM-07/26-27/019-R10 JWM-07/26-27/019 27 Jul 2026, 17:00 FG 30.7m x 1.8m 49.4 kg" [ref=f1e553] [cursor=pointer]:
+                  - /url: /programs/5720c90d-4697-4657-9d5c-a6589a43e578
+                  - generic [ref=f1e554]:
+                    - generic [ref=f1e555]:
+                      - paragraph [ref=f1e556]: JWM-07/26-27/019-R10
+                      - paragraph [ref=f1e557]: JWM-07/26-27/019
+                      - paragraph [ref=f1e558]: 27 Jul 2026, 17:00
+                    - generic [ref=f1e559]:
+                      - generic [ref=f1e560]: FG
+                      - paragraph [ref=f1e561]: 30.7m x 1.8m
+                      - paragraph [ref=f1e562]: 49.4 kg
+                - link "JWM-02/26-27/008-R9 JWM-02/26-27/008 27 Jul 2026, 17:00 FG 30.1m x 2m 36.5 kg" [ref=f1e563] [cursor=pointer]:
+                  - /url: /programs/988024b4-149e-48e4-b20a-5ee6b142d67a
+                  - generic [ref=f1e564]:
+                    - generic [ref=f1e565]:
+                      - paragraph [ref=f1e566]: JWM-02/26-27/008-R9
+                      - paragraph [ref=f1e567]: JWM-02/26-27/008
+                      - paragraph [ref=f1e568]: 27 Jul 2026, 17:00
+                    - generic [ref=f1e569]:
+                      - generic [ref=f1e570]: FG
+                      - paragraph [ref=f1e571]: 30.1m x 2m
+                      - paragraph [ref=f1e572]: 36.5 kg
+                - link "JWM-01/26-27/004-R2 JWM-01/26-27/004 27 Jul 2026, 17:00 FG 33.7m x 1.2m 30.3 kg" [ref=f1e573] [cursor=pointer]:
+                  - /url: /programs/4c6f1401-c05a-47c8-97e9-cdea21a2e5ea
+                  - generic [ref=f1e574]:
+                    - generic [ref=f1e575]:
+                      - paragraph [ref=f1e576]: JWM-01/26-27/004-R2
+                      - paragraph [ref=f1e577]: JWM-01/26-27/004
+                      - paragraph [ref=f1e578]: 27 Jul 2026, 17:00
+                    - generic [ref=f1e579]:
+                      - generic [ref=f1e580]: FG
+                      - paragraph [ref=f1e581]: 33.7m x 1.2m
+                      - paragraph [ref=f1e582]: 30.3 kg
+          - 'button "Daily Digest Yesterday: 0 POs, 2 dispatches, 7 rolls" [ref=f1e584]':
+            - generic [ref=f1e587]: Daily Digest
+            - generic [ref=f1e588]: "Yesterday: 0 POs, 2 dispatches, 7 rolls"
+          - generic [ref=f1e592]:
+            - button "Anomaly Detection 8" [expanded] [ref=f1e593]:
+              - generic [ref=f1e596]: Anomaly Detection
+              - generic [ref=f1e597]: "8"
+            - generic [ref=f1e602]:
+              - generic [ref=f1e603]:
+                - generic [ref=f1e605]:
+                  - generic [ref=f1e606]:
+                    - generic [ref=f1e607]: High scrap on JWM-07/25-26/002
+                    - generic [ref=f1e608]: JWM-07/25-26/002
+                  - generic [ref=f1e609]: Critical
+                - generic [ref=f1e610]:
+                  - paragraph [ref=f1e611]: Program JWM-07/25-26/002 (07) produced 52.8 kg scrap, which is 4.2 standard deviations above the mean of 17.5 kg.
+                  - generic [ref=f1e612]:
+                    - generic [ref=f1e613]: "Expected: 17.51"
+                    - generic [ref=f1e614]: "Actual: 52.8"
+                    - generic [ref=f1e615]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e616]: +201.47%
+              - generic [ref=f1e617]:
+                - generic [ref=f1e619]:
+                  - generic [ref=f1e620]:
+                    - generic [ref=f1e621]: High scrap on JWM-07/26-27/018
+                    - generic [ref=f1e622]: JWM-07/26-27/018
+                  - generic [ref=f1e623]: Critical
+                - generic [ref=f1e624]:
+                  - paragraph [ref=f1e625]: Program JWM-07/26-27/018 (07) produced 45.1 kg scrap, which is 3.3 standard deviations above the mean of 17.5 kg.
+                  - generic [ref=f1e626]:
+                    - generic [ref=f1e627]: "Expected: 17.51"
+                    - generic [ref=f1e628]: "Actual: 45.1"
+                    - generic [ref=f1e629]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e630]: +157.51%
+              - generic [ref=f1e631]:
+                - generic [ref=f1e633]:
+                  - generic [ref=f1e634]:
+                    - generic [ref=f1e635]: Production slowdown on 01
+                    - generic [ref=f1e636]: "01"
+                  - generic [ref=f1e637]: Critical
+                - generic [ref=f1e638]:
+                  - paragraph [ref=f1e639]: 01 produced 5 rolls in 2026-07, compared to an average of 14.0 rolls/month over the previous 3 months (3.1 std devs below mean).
+                  - generic [ref=f1e640]:
+                    - generic [ref=f1e641]: "Expected: 14"
+                    - generic [ref=f1e642]: "Actual: 5"
+                    - generic [ref=f1e643]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e644]: "-64.29%"
+              - generic [ref=f1e645]:
+                - generic [ref=f1e647]:
+                  - generic [ref=f1e648]:
+                    - generic [ref=f1e649]: Unusually large order from GAYLORD ENTERPRISE
+                    - generic [ref=f1e650]: GAYLORD ENTERPRISE
+                  - generic [ref=f1e651]: Critical
+                - generic [ref=f1e652]:
+                  - paragraph [ref=f1e653]: Order ODR-GE-035/26-27 has value 36859, which is 3.4 std devs above the customer's mean of 10853.
+                  - generic [ref=f1e654]:
+                    - generic [ref=f1e655]: "Expected: 10,852.56"
+                    - generic [ref=f1e656]: "Actual: 36,858.6"
+                    - generic [ref=f1e657]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e658]: +239.63%
+              - generic [ref=f1e659]:
+                - generic [ref=f1e661]:
+                  - generic [ref=f1e662]:
+                    - generic [ref=f1e663]: Unusually large order from GAYLORD ENTERPRISE
+                    - generic [ref=f1e664]: GAYLORD ENTERPRISE
+                  - generic [ref=f1e665]: Critical
+                - generic [ref=f1e666]:
+                  - paragraph [ref=f1e667]: Order ODR-GE-040/26-27 has value 35214, which is 3.1 std devs above the customer's mean of 10853.
+                  - generic [ref=f1e668]:
+                    - generic [ref=f1e669]: "Expected: 10,852.56"
+                    - generic [ref=f1e670]: "Actual: 35,214"
+                    - generic [ref=f1e671]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e672]: +224.48%
+              - generic [ref=f1e673]:
+                - generic [ref=f1e675]:
+                  - generic [ref=f1e676]:
+                    - generic [ref=f1e677]: Unusually large order from SAITA SCREENS AND FILTERS
+                    - generic [ref=f1e678]: SAITA SCREENS AND FILTERS
+                  - generic [ref=f1e679]: Critical
+                - generic [ref=f1e680]:
+                  - paragraph [ref=f1e681]: Order ODR-SSAF-013/26-27 has value 2508, which is 3.8 std devs above the customer's mean of 436.
+                  - generic [ref=f1e682]:
+                    - generic [ref=f1e683]: "Expected: 435.9"
+                    - generic [ref=f1e684]: "Actual: 2,508"
+                    - generic [ref=f1e685]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e686]: +475.36%
+              - generic [ref=f1e687]:
+                - generic [ref=f1e689]:
+                  - generic [ref=f1e690]:
+                    - generic [ref=f1e691]: Unusually large order from UJJAWAL ENTERPRISE
+                    - generic [ref=f1e692]: UJJAWAL ENTERPRISE
+                  - generic [ref=f1e693]: Warning
+                - generic [ref=f1e694]:
+                  - paragraph [ref=f1e695]: Order ODR-UE-005/25-26 has value 25830, which is 2.5 std devs above the customer's mean of 10661.
+                  - generic [ref=f1e696]:
+                    - generic [ref=f1e697]: "Expected: 10,661.44"
+                    - generic [ref=f1e698]: "Actual: 25,830"
+                    - generic [ref=f1e699]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e700]: +142.27%
+              - generic [ref=f1e701]:
+                - generic [ref=f1e703]:
+                  - generic [ref=f1e704]:
+                    - generic [ref=f1e705]: Unusually large order from WIRE NETTING STORE
+                    - generic [ref=f1e706]: WIRE NETTING STORE
+                  - generic [ref=f1e707]: Warning
+                - generic [ref=f1e708]:
+                  - paragraph [ref=f1e709]: Order ODR-WNS-002/26-27 has value 29280, which is 2.7 std devs above the customer's mean of 8375.
+                  - generic [ref=f1e710]:
+                    - generic [ref=f1e711]: "Expected: 8,375.34"
+                    - generic [ref=f1e712]: "Actual: 29,280"
+                    - generic [ref=f1e713]:
+                      - text: "Deviation:"
+                      - generic [ref=f1e714]: +249.6%
+    - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=f1e271] [cursor=pointer]
+  - alert [ref=f1e322]
