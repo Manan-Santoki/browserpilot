@@ -24,6 +24,7 @@ JWM is simply the **first row in the `SiteProfile` table** — a target a user r
 | Users | Team, with `ADMIN` / `USER` roles | Retrofitting privilege separation later means touching every query. Build it in from the first migration. |
 | Session viewer | Live grid + detail view | "See the browsers open" — a dashboard of live thumbnails, click through to full chat, full-size preview, and approvals. |
 | Database | Postgres (replaces the planned SQLite) | Its own instance, provisioned as a **separate Dokploy service** alongside the BrowserPilot apps. Shared with nothing. |
+| ORM | **Drizzle** over postgres-js (not Prisma) | The runtime is Bun and the console is Node, and one schema has to serve both. Prisma's generated client failed to resolve under Bun during Phase 1 testing; Drizzle has no generated client to resolve and was verified working under both runtimes against the real database before this was written. |
 | Target sites | Added from the UI, stored in Postgres | No per-target environment variables. A user adds JWM (or any site) in the console; the runtime reads it from the database. |
 | Mobile pairing | QR pairing lands in this phase | The console shows the QR; the mobile app scans it to reach the same sessions. The app itself still follows later, but the pairing API and device model ship here. |
 | Voice input | In scope, via Groq Whisper (en/hi/gu) | Pulled forward from Phase 3. Whisper handles Gujarati and Hindi well, and Groq's hosting is fast and cheap enough for push-to-talk. BrowserPilot uses **its own** Groq account and key. |
