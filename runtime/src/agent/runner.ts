@@ -78,6 +78,25 @@ function createInputStream() {
   };
 }
 
+/**
+ * Environment for the agent subprocess.
+ *
+ * The SDK replaces the subprocess environment with whatever `env` holds rather
+ * than merging it into `process.env`, so passing the credential alone would
+ * strip `PATH` and `HOME` — and the MCP server's `node` would stop resolving.
+ * Inherit the real environment, drop any ambient Anthropic credential so it
+ * cannot outrank the configured one, then apply ours.
+ */
+function subprocessEnv(credential: Record<string, string>): Record<string, string> {
+  const inherited: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) inherited[key] = value;
+  }
+  delete inherited.CLAUDE_CODE_OAUTH_TOKEN;
+  delete inherited.ANTHROPIC_API_KEY;
+  return { ...inherited, ...credential };
+}
+
 function shortToolName(name: string): string {
   return name.replace(/^mcp__playwright__/, "");
 }
@@ -129,7 +148,7 @@ export async function startAgent(
 
   const options: Options = {
     model: opts.model,
-    env: opts.env,
+    env: subprocessEnv(opts.env),
     systemPrompt: buildSystemPrompt(opts.jwmUrl),
     // The browser is the agent's entire world. Without this the SDK hands it
     // the full Claude Code toolset — Bash, Read, Write, and filesystem access

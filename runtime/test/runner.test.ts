@@ -106,9 +106,30 @@ describe("startAgent", () => {
     // No built-in Claude Code tools: the browser is the agent's whole world.
     expect(fake.captured.options!.tools).toEqual([]);
     expect(fake.captured.options!.model).toBe("claude-opus-5");
-    expect(fake.captured.options!.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "t" });
-
     await runner.stop();
+  });
+
+  test("passes our credential and keeps the inherited PATH", async () => {
+    // The SDK *replaces* the subprocess environment rather than merging, so a
+    // bare credential object would leave the agent with no PATH and no HOME —
+    // and `node` would stop resolving for the MCP server.
+    const previous = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-ambient";
+    try {
+      const fake = fakeQuery();
+      const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+      const env = fake.captured.options!.env as Record<string, string>;
+
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("t");
+      expect(typeof env.PATH).toBe("string");
+      // An ambient key must never quietly outrank the configured credential.
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+
+      await runner.stop();
+    } finally {
+      if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previous;
+    }
   });
 
   test("emits assistant text as agent_text events", async () => {
