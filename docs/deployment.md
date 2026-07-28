@@ -19,7 +19,11 @@ Production `DATABASE_URL` (services on the same Dokploy network reach it by serv
 postgresql://browserpilot:<password>@browserpilot-postgres-sv6isw:5432/browserpilot
 ```
 
-**The database is deliberately not exposed on a public port.** Application containers reach it over Dokploy's internal network. If you ever need direct access for a migration or inspection, add an external port temporarily in the Dokploy UI and remove it afterwards — do not leave it open.
+### External access (development)
+
+The database is also published on **`46.4.244.39:5433`** so migrations and local development can run against the live instance. The account has a 32-character random password and the database holds no third-party data, but this is still a database open to the internet.
+
+**Close this port once the console is deployed** — set the external port to `null` and redeploy. From then on the application containers reach Postgres over Dokploy's internal network by service name, which needs no public exposure at all.
 
 ## Still to provision
 
