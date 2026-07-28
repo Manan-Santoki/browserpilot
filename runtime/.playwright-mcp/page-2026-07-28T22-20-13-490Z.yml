@@ -1,0 +1,539 @@
+- generic [ref=f2e1]:
+  - generic [ref=f2e302] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f2e303]
+    - generic [ref=f2e307]:
+      - button "Open issues overlay" [ref=f2e308]:
+        - generic [ref=f2e309]:
+          - generic [ref=f2e310]: "2"
+          - generic [ref=f2e311]: "3"
+        - generic [ref=f2e312]:
+          - text: Issue
+          - generic [ref=f2e313]: s
+      - button "Collapse issues badge" [ref=f2e314]
+  - generic [ref=f2e317]:
+    - complementary [ref=f2e318]:
+      - generic [ref=f2e320]:
+        - generic [ref=f2e321]:
+          - generic [ref=f2e322]: JWM Inventory
+          - generic [ref=f2e323]: v2.15
+        - button [ref=f2e671]
+      - navigation [ref=f2e326]:
+        - link [ref=f2e672] [cursor=pointer]:
+          - /url: /dashboard
+          - generic [ref=f2e333]: Dashboard
+        - generic [ref=f2e334]:
+          - paragraph [ref=f2e335]: Purchase
+          - link [ref=f2e673] [cursor=pointer]:
+            - /url: /purchase-orders
+            - generic [ref=f2e341]: Purchase Orders
+          - link [ref=f2e674] [cursor=pointer]:
+            - /url: /inventory
+            - generic [ref=f2e347]: Inventory
+        - generic [ref=f2e348]:
+          - paragraph [ref=f2e349]: Production
+          - link [ref=f2e675] [cursor=pointer]:
+            - /url: /programs
+            - generic [ref=f2e362]: Programs
+          - link [ref=f2e676] [cursor=pointer]:
+            - /url: /production-planning
+            - generic [ref=f2e367]: Planning
+          - link [ref=f2e677] [cursor=pointer]:
+            - /url: /warping
+            - generic [ref=f2e373]: Warping
+          - link [ref=f2e678] [cursor=pointer]:
+            - /url: /roll-entry
+            - generic [ref=f2e378]: Roll Entry
+          - link [ref=f2e679] [cursor=pointer]:
+            - /url: /fg-inventory
+            - generic [ref=f2e390]: FG Inventory
+          - link [ref=f2e680] [cursor=pointer]:
+            - /url: /scrap
+            - generic [ref=f2e395]: Scrap
+        - generic [ref=f2e396]:
+          - paragraph [ref=f2e397]: Sales
+          - link [ref=f2e681] [cursor=pointer]:
+            - /url: /revenue
+            - generic [ref=f2e402]: Revenue
+          - link [ref=f2e682] [cursor=pointer]:
+            - /url: /sales/new
+            - generic [ref=f2e406]: New Sales
+          - link [ref=f2e683] [cursor=pointer]:
+            - /url: /enquiries
+            - generic [ref=f2e411]: Enquiries
+          - link [ref=f2e684] [cursor=pointer]:
+            - /url: /orders
+            - generic [ref=f2e417]: Orders
+          - link [ref=f2e685] [cursor=pointer]:
+            - /url: /dispatch
+            - generic [ref=f2e424]: Dispatch
+          - link [ref=f2e686] [cursor=pointer]:
+            - /url: /costing
+            - generic [ref=f2e428]: Wiremesh Costing
+        - generic [ref=f2e429]:
+          - paragraph [ref=f2e430]: Master Data
+          - link [ref=f2e687] [cursor=pointer]:
+            - /url: /min-inventory
+            - generic [ref=f2e436]: Min Inventory
+          - link [ref=f2e688] [cursor=pointer]:
+            - /url: /suppliers
+            - generic [ref=f2e442]: Suppliers
+          - link [ref=f2e689] [cursor=pointer]:
+            - /url: /customers
+            - generic [ref=f2e449]: Customers
+          - link [ref=f2e690] [cursor=pointer]:
+            - /url: /machines
+            - generic [ref=f2e453]: Machines
+        - generic [ref=f2e454]:
+          - paragraph [ref=f2e455]: Tools
+          - link [ref=f2e691] [cursor=pointer]:
+            - /url: /reports
+            - generic [ref=f2e459]: Reports
+          - link [ref=f2e692] [cursor=pointer]:
+            - /url: /ai
+            - generic [ref=f2e464]: AI Workspace
+          - link [ref=f2e693] [cursor=pointer]:
+            - /url: /feedback
+            - generic [ref=f2e468]: Feedback
+          - link [ref=f2e694] [cursor=pointer]:
+            - /url: /whatsapp
+            - generic [ref=f2e472]: WhatsApp
+        - generic [ref=f2e473]:
+          - paragraph [ref=f2e474]: Admin
+          - link [ref=f2e695] [cursor=pointer]:
+            - /url: /admin/users
+            - generic [ref=f2e481]: Users
+          - link [ref=f2e696] [cursor=pointer]:
+            - /url: /admin/logs
+            - generic [ref=f2e486]: Logs
+          - link [ref=f2e697] [cursor=pointer]:
+            - /url: /admin/system
+            - generic [ref=f2e491]: System
+          - link [ref=f2e698] [cursor=pointer]:
+            - /url: /admin/mobile-app
+            - generic [ref=f2e495]: Mobile App
+          - link [ref=f2e699] [cursor=pointer]:
+            - /url: /admin/landing-content
+            - generic [ref=f2e500]: Landing Site
+        - link [ref=f2e700] [cursor=pointer]:
+          - /url: /developer
+          - generic [ref=f2e504]: Developer
+    - generic [ref=f2e505]:
+      - banner [ref=f2e506]:
+        - generic [ref=f2e507]:
+          - combobox [ref=f2e511]:
+            - generic [ref=f2e512]: en
+            - img: ▼
+          - textbox [ref=f2e513]: en
+        - button [ref=f2e701]
+        - button [ref=f2e702]:
+          - generic [ref=f2e519]: "78"
+        - button [ref=f2e703]:
+          - generic [ref=f2e523]:
+            - generic [ref=f2e524]: Manan
+            - generic [ref=f2e525]: DEVELOPER
+      - main [ref=f2e526]:
+        - generic [ref=f2e528]:
+          - generic [ref=f2e529]:
+            - generic [ref=f2e530]:
+              - heading [level=1] [ref=f2e705]: Machines
+              - paragraph [ref=f2e532]: Manage production machines
+            - button [ref=f2e706]: Add Machine
+          - generic [ref=f2e535]:
+            - textbox [ref=f2e707]:
+              - /placeholder: Search machines...
+            - table [ref=f2e539]:
+              - rowgroup [ref=f2e540]:
+                - row [ref=f2e708]:
+                  - columnheader [ref=f2e709] [cursor=pointer]:
+                    - generic [ref=f2e543]: Machine Number
+                  - columnheader [ref=f2e710] [cursor=pointer]:
+                    - generic [ref=f2e549]: Name
+                  - columnheader [ref=f2e711] [cursor=pointer]:
+                    - generic [ref=f2e555]: Financial Year
+                  - columnheader [ref=f2e712] [cursor=pointer]:
+                    - generic [ref=f2e561]: Warp Beam Diameter
+                  - columnheader [ref=f2e713] [cursor=pointer]:
+                    - generic [ref=f2e567]: Status
+                  - columnheader [ref=f2e714]:
+                    - generic [ref=f2e573]: Actions
+              - rowgroup [ref=f2e574]:
+                - row [ref=f2e715]:
+                  - cell [ref=f2e716]: "05"
+                  - cell [ref=f2e717]: 1.63 MTR WIDTH MACHINE
+                  - cell [ref=f2e718]: 2026-27
+                  - cell [ref=f2e719]: 1.3 m
+                  - cell [ref=f2e720]:
+                    - generic [ref=f2e721]: Active
+                  - cell [ref=f2e582]:
+                    - button [ref=f2e722]:
+                      - button [ref=f2e723]
+                - row [ref=f2e724]:
+                  - cell [ref=f2e725]: "08"
+                  - cell [ref=f2e726]: 2.00 MTR WIDTH MACHINE
+                  - cell [ref=f2e727]: 2026-27
+                  - cell [ref=f2e728]: 1.5 m
+                  - cell [ref=f2e729]:
+                    - generic [ref=f2e730]: Active
+                  - cell [ref=f2e592]:
+                    - button [ref=f2e731]:
+                      - button [ref=f2e732]
+                - row [ref=f2e733]:
+                  - cell [ref=f2e734]: "06"
+                  - cell [ref=f2e735]: 1.63 MTR WIDTH MACHINE
+                  - cell [ref=f2e736]: 2026-27
+                  - cell [ref=f2e737]: 1.3 m
+                  - cell [ref=f2e738]:
+                    - generic [ref=f2e739]: Active
+                  - cell [ref=f2e602]:
+                    - button [ref=f2e740]:
+                      - button [ref=f2e741]
+                - row [ref=f2e742]:
+                  - cell [ref=f2e743]: "04"
+                  - cell [ref=f2e744]: 1.63 MTR WIDTH MACHINE
+                  - cell [ref=f2e745]: 2026-27
+                  - cell [ref=f2e746]: 1.3 m
+                  - cell [ref=f2e747]:
+                    - generic [ref=f2e748]: Active
+                  - cell [ref=f2e612]:
+                    - button [ref=f2e749]:
+                      - button [ref=f2e750]
+                - row [ref=f2e751]:
+                  - cell [ref=f2e752]: "03"
+                  - cell [ref=f2e753]: 1.65 MTR WIDTH MACHINE
+                  - cell [ref=f2e754]: 2026-27
+                  - cell [ref=f2e755]: 1.3 m
+                  - cell [ref=f2e756]:
+                    - generic [ref=f2e757]: Active
+                  - cell [ref=f2e622]:
+                    - button [ref=f2e758]:
+                      - button [ref=f2e759]
+                - row [ref=f2e760]:
+                  - cell [ref=f2e761]: "02"
+                  - cell [ref=f2e762]: 2.00 MTR WIDTH MACHINE
+                  - cell [ref=f2e763]: 2026-27
+                  - cell [ref=f2e764]: 1.3 m
+                  - cell [ref=f2e765]:
+                    - generic [ref=f2e766]: Active
+                  - cell [ref=f2e632]:
+                    - button [ref=f2e767]:
+                      - button [ref=f2e768]
+                - row [ref=f2e769]:
+                  - cell [ref=f2e770]: "07"
+                  - cell [ref=f2e771]: 2.2.0 MTR WIDTH MACHINE
+                  - cell [ref=f2e772]: 2026-27
+                  - cell [ref=f2e773]: 1.3 m
+                  - cell [ref=f2e774]:
+                    - generic [ref=f2e775]: Active
+                  - cell [ref=f2e642]:
+                    - button [ref=f2e776]:
+                      - button [ref=f2e777]
+                - row [ref=f2e778]:
+                  - cell [ref=f2e779]: "01"
+                  - cell [ref=f2e780]: 1.30 MTR WIDTH MACHINE
+                  - cell [ref=f2e781]: 2026-27
+                  - cell [ref=f2e782]: 1 m
+                  - cell [ref=f2e783]:
+                    - generic [ref=f2e784]: Active
+                  - cell [ref=f2e652]:
+                    - button [ref=f2e785]:
+                      - button [ref=f2e786]
+                - row [ref=f2e787]:
+                  - cell [ref=f2e788]: TR
+                  - cell [ref=f2e789]: Trading
+                  - cell [ref=f2e790]: 2026-27
+                  - cell [ref=f2e791]: —
+                  - cell [ref=f2e792]:
+                    - generic [ref=f2e793]: Active
+                  - cell [ref=f2e662]:
+                    - button [ref=f2e794]:
+                      - button [ref=f2e795]
+            - generic [ref=f2e665]:
+              - paragraph [ref=f2e667]: Page 1 of 1
+              - generic [ref=f2e668]:
+                - button [disabled]
+                - button [disabled]
+                - button [disabled]
+                - button [disabled]
+          - generic [ref=f2e669]:
+            - generic [ref=f2e796]:
+              - generic [ref=f2e797]: Overall Equipment Effectiveness
+              - generic [ref=f2e799]:
+                - generic [ref=f2e800]: 0.7%
+                - generic [ref=f2e801]: Average OEE across 9 machines
+                - generic [ref=f2e802]: Poor
+            - generic [ref=f2e803]:
+              - generic [ref=f2e804]: OEE by Machine
+              - img [ref=f2e810]:
+                - generic [ref=f2e815]:
+                  - generic [ref=f2e816]: "06"
+                  - generic [ref=f2e818]: "08"
+                  - generic [ref=f2e820]: "04"
+                  - generic [ref=f2e822]: "03"
+                  - generic [ref=f2e824]: "05"
+                  - generic [ref=f2e826]: "07"
+                  - generic [ref=f2e828]: "01"
+                  - generic [ref=f2e830]: "02"
+                  - generic [ref=f2e832]: TR
+                - generic [ref=f2e835]:
+                  - generic [ref=f2e836]: "0"
+                  - generic [ref=f2e838]: "25"
+                  - generic [ref=f2e840]: "50"
+                  - generic [ref=f2e842]: "75"
+                  - generic [ref=f2e844]: "100"
+            - generic [ref=f2e864]:
+              - generic [ref=f2e865]:
+                - generic [ref=f2e866]:
+                  - generic [ref=f2e867]:
+                    - generic [ref=f2e868]: Machine 06
+                    - generic [ref=f2e869]: Poor
+                  - paragraph [ref=f2e870]: 1.6%OEE
+                - generic [ref=f2e871]:
+                  - progressbar [ref=f2e872]:
+                    - generic [ref=f2e873]: Availability
+                    - generic [ref=f2e874]: 75%
+                  - progressbar [ref=f2e877]:
+                    - generic [ref=f2e878]: Performance
+                    - generic [ref=f2e879]: 2%
+                  - progressbar [ref=f2e882]:
+                    - generic [ref=f2e883]: Quality
+                    - generic [ref=f2e884]: 94%
+                  - generic [ref=f2e887]:
+                    - generic [ref=f2e888]:
+                      - paragraph [ref=f2e889]: Programs
+                      - paragraph [ref=f2e890]: 6/8
+                    - generic [ref=f2e891]:
+                      - paragraph [ref=f2e892]: Rolls
+                      - paragraph [ref=f2e893]: "60"
+                    - generic [ref=f2e894]:
+                      - paragraph [ref=f2e895]: Scrap
+                      - paragraph [ref=f2e896]: 130.2 kg
+              - generic [ref=f2e897]:
+                - generic [ref=f2e898]:
+                  - generic [ref=f2e899]:
+                    - generic [ref=f2e900]: Machine 08
+                    - generic [ref=f2e901]: Poor
+                  - paragraph [ref=f2e902]: 1.5%OEE
+                - generic [ref=f2e903]:
+                  - progressbar [ref=f2e904]:
+                    - generic [ref=f2e905]: Availability
+                    - generic [ref=f2e906]: 50%
+                  - progressbar [ref=f2e909]:
+                    - generic [ref=f2e910]: Performance
+                    - generic [ref=f2e911]: 3%
+                  - progressbar [ref=f2e914]:
+                    - generic [ref=f2e915]: Quality
+                    - generic [ref=f2e916]: 99%
+                  - generic [ref=f2e919]:
+                    - generic [ref=f2e920]:
+                      - paragraph [ref=f2e921]: Programs
+                      - paragraph [ref=f2e922]: 3/6
+                    - generic [ref=f2e923]:
+                      - paragraph [ref=f2e924]: Rolls
+                      - paragraph [ref=f2e925]: "55"
+                    - generic [ref=f2e926]:
+                      - paragraph [ref=f2e927]: Scrap
+                      - paragraph [ref=f2e928]: 30.2 kg
+              - generic [ref=f2e929]:
+                - generic [ref=f2e930]:
+                  - generic [ref=f2e931]:
+                    - generic [ref=f2e932]: Machine 04
+                    - generic [ref=f2e933]: Poor
+                  - paragraph [ref=f2e934]: 1.0%OEE
+                - generic [ref=f2e935]:
+                  - progressbar [ref=f2e936]:
+                    - generic [ref=f2e937]: Availability
+                    - generic [ref=f2e938]: 75%
+                  - progressbar [ref=f2e941]:
+                    - generic [ref=f2e942]: Performance
+                    - generic [ref=f2e943]: 1%
+                  - progressbar [ref=f2e946]:
+                    - generic [ref=f2e947]: Quality
+                    - generic [ref=f2e948]: 95%
+                  - generic [ref=f2e951]:
+                    - generic [ref=f2e952]:
+                      - paragraph [ref=f2e953]: Programs
+                      - paragraph [ref=f2e954]: 9/12
+                    - generic [ref=f2e955]:
+                      - paragraph [ref=f2e956]: Rolls
+                      - paragraph [ref=f2e957]: "76"
+                    - generic [ref=f2e958]:
+                      - paragraph [ref=f2e959]: Scrap
+                      - paragraph [ref=f2e960]: 135.6 kg
+              - generic [ref=f2e961]:
+                - generic [ref=f2e962]:
+                  - generic [ref=f2e963]:
+                    - generic [ref=f2e964]: Machine 03
+                    - generic [ref=f2e965]: Poor
+                  - paragraph [ref=f2e966]: 0.8%OEE
+                - generic [ref=f2e967]:
+                  - progressbar [ref=f2e968]:
+                    - generic [ref=f2e969]: Availability
+                    - generic [ref=f2e970]: 71%
+                  - progressbar [ref=f2e973]:
+                    - generic [ref=f2e974]: Performance
+                    - generic [ref=f2e975]: 1%
+                  - progressbar [ref=f2e978]:
+                    - generic [ref=f2e979]: Quality
+                    - generic [ref=f2e980]: 95%
+                  - generic [ref=f2e983]:
+                    - generic [ref=f2e984]:
+                      - paragraph [ref=f2e985]: Programs
+                      - paragraph [ref=f2e986]: 5/7
+                    - generic [ref=f2e987]:
+                      - paragraph [ref=f2e988]: Rolls
+                      - paragraph [ref=f2e989]: "47"
+                    - generic [ref=f2e990]:
+                      - paragraph [ref=f2e991]: Scrap
+                      - paragraph [ref=f2e992]: 55.5 kg
+              - generic [ref=f2e993]:
+                - generic [ref=f2e994]:
+                  - generic [ref=f2e995]:
+                    - generic [ref=f2e996]: Machine 05
+                    - generic [ref=f2e997]: Poor
+                  - paragraph [ref=f2e998]: 0.7%OEE
+                - generic [ref=f2e999]:
+                  - progressbar [ref=f2e1000]:
+                    - generic [ref=f2e1001]: Availability
+                    - generic [ref=f2e1002]: 63%
+                  - progressbar [ref=f2e1005]:
+                    - generic [ref=f2e1006]: Performance
+                    - generic [ref=f2e1007]: 1%
+                  - progressbar [ref=f2e1010]:
+                    - generic [ref=f2e1011]: Quality
+                    - generic [ref=f2e1012]: 95%
+                  - generic [ref=f2e1015]:
+                    - generic [ref=f2e1016]:
+                      - paragraph [ref=f2e1017]: Programs
+                      - paragraph [ref=f2e1018]: 5/8
+                    - generic [ref=f2e1019]:
+                      - paragraph [ref=f2e1020]: Rolls
+                      - paragraph [ref=f2e1021]: "43"
+                    - generic [ref=f2e1022]:
+                      - paragraph [ref=f2e1023]: Scrap
+                      - paragraph [ref=f2e1024]: 62.0 kg
+              - generic [ref=f2e1025]:
+                - generic [ref=f2e1026]:
+                  - generic [ref=f2e1027]:
+                    - generic [ref=f2e1028]: Machine 07
+                    - generic [ref=f2e1029]: Poor
+                  - paragraph [ref=f2e1030]: 0.5%OEE
+                - generic [ref=f2e1031]:
+                  - progressbar [ref=f2e1032]:
+                    - generic [ref=f2e1033]: Availability
+                    - generic [ref=f2e1034]: 64%
+                  - progressbar [ref=f2e1037]:
+                    - generic [ref=f2e1038]: Performance
+                    - generic [ref=f2e1039]: 1%
+                  - progressbar [ref=f2e1042]:
+                    - generic [ref=f2e1043]: Quality
+                    - generic [ref=f2e1044]: 95%
+                  - generic [ref=f2e1047]:
+                    - generic [ref=f2e1048]:
+                      - paragraph [ref=f2e1049]: Programs
+                      - paragraph [ref=f2e1050]: 9/14
+                    - generic [ref=f2e1051]:
+                      - paragraph [ref=f2e1052]: Rolls
+                      - paragraph [ref=f2e1053]: "106"
+                    - generic [ref=f2e1054]:
+                      - paragraph [ref=f2e1055]: Scrap
+                      - paragraph [ref=f2e1056]: 209.6 kg
+              - generic [ref=f2e1057]:
+                - generic [ref=f2e1058]:
+                  - generic [ref=f2e1059]:
+                    - generic [ref=f2e1060]: Machine 01
+                    - generic [ref=f2e1061]: Poor
+                  - paragraph [ref=f2e1062]: 0.3%OEE
+                - generic [ref=f2e1063]:
+                  - progressbar [ref=f2e1064]:
+                    - generic [ref=f2e1065]: Availability
+                    - generic [ref=f2e1066]: 40%
+                  - progressbar [ref=f2e1069]:
+                    - generic [ref=f2e1070]: Performance
+                    - generic [ref=f2e1071]: 1%
+                  - progressbar [ref=f2e1074]:
+                    - generic [ref=f2e1075]: Quality
+                    - generic [ref=f2e1076]: 93%
+                  - generic [ref=f2e1079]:
+                    - generic [ref=f2e1080]:
+                      - paragraph [ref=f2e1081]: Programs
+                      - paragraph [ref=f2e1082]: 2/5
+                    - generic [ref=f2e1083]:
+                      - paragraph [ref=f2e1084]: Rolls
+                      - paragraph [ref=f2e1085]: "16"
+                    - generic [ref=f2e1086]:
+                      - paragraph [ref=f2e1087]: Scrap
+                      - paragraph [ref=f2e1088]: 29.5 kg
+              - generic [ref=f2e1089]:
+                - generic [ref=f2e1090]:
+                  - generic [ref=f2e1091]:
+                    - generic [ref=f2e1092]: Machine 02
+                    - generic [ref=f2e1093]: Poor
+                  - paragraph [ref=f2e1094]: 0.3%OEE
+                - generic [ref=f2e1095]:
+                  - progressbar [ref=f2e1096]:
+                    - generic [ref=f2e1097]: Availability
+                    - generic [ref=f2e1098]: 43%
+                  - progressbar [ref=f2e1101]:
+                    - generic [ref=f2e1102]: Performance
+                    - generic [ref=f2e1103]: 1%
+                  - progressbar [ref=f2e1106]:
+                    - generic [ref=f2e1107]: Quality
+                    - generic [ref=f2e1108]: 96%
+                  - generic [ref=f2e1111]:
+                    - generic [ref=f2e1112]:
+                      - paragraph [ref=f2e1113]: Programs
+                      - paragraph [ref=f2e1114]: 3/7
+                    - generic [ref=f2e1115]:
+                      - paragraph [ref=f2e1116]: Rolls
+                      - paragraph [ref=f2e1117]: "46"
+                    - generic [ref=f2e1118]:
+                      - paragraph [ref=f2e1119]: Scrap
+                      - paragraph [ref=f2e1120]: 58.5 kg
+              - generic [ref=f2e1121]:
+                - generic [ref=f2e1122]:
+                  - generic [ref=f2e1123]:
+                    - generic [ref=f2e1124]: Machine TR
+                    - generic [ref=f2e1125]: Poor
+                  - paragraph [ref=f2e1126]: 0.0%OEE
+                - generic [ref=f2e1127]:
+                  - progressbar [ref=f2e1128]:
+                    - generic [ref=f2e1129]: Availability
+                    - generic [ref=f2e1130]: 0%
+                  - progressbar [ref=f2e1132]:
+                    - generic [ref=f2e1133]: Performance
+                    - generic [ref=f2e1134]: 100%
+                  - progressbar [ref=f2e1137]:
+                    - generic [ref=f2e1138]: Quality
+                    - generic [ref=f2e1139]: 0%
+                  - generic [ref=f2e1141]:
+                    - generic [ref=f2e1142]:
+                      - paragraph [ref=f2e1143]: Programs
+                      - paragraph [ref=f2e1144]: 0/0
+                    - generic [ref=f2e1145]:
+                      - paragraph [ref=f2e1146]: Rolls
+                      - paragraph [ref=f2e1147]: "0"
+                    - generic [ref=f2e1148]:
+                      - paragraph [ref=f2e1149]: Scrap
+                      - paragraph [ref=f2e1150]: 0.0 kg
+    - region "Notifications alt+T"
+  - alert [ref=f2e670]
+  - generic [ref=f2e1151]: "0"
+  - dialog [ref=f2e1155]:
+    - heading "Add Machine" [level=2] [ref=f2e1157]
+    - generic [ref=f2e1158]:
+      - generic [ref=f2e1159]:
+        - generic [ref=f2e1160]: Machine Number *
+        - textbox [active] [ref=f2e1161]
+      - generic [ref=f2e1162]:
+        - generic [ref=f2e1163]: Name
+        - textbox [ref=f2e1164]
+      - generic [ref=f2e1165]:
+        - generic [ref=f2e1166]: Financial Year
+        - textbox "e.g. 2024-25" [ref=f2e1167]
+      - generic [ref=f2e1168]:
+        - generic [ref=f2e1169]: Warp Beam Diameter (m)
+        - spinbutton "e.g. 1.30" [ref=f2e1170]
+      - generic [ref=f2e1171]:
+        - button "Cancel" [ref=f2e1172]
+        - button "Create" [ref=f2e1173]
+    - button "Close" [ref=f2e1174]

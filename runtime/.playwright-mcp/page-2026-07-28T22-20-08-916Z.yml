@@ -1,0 +1,180 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - complementary [ref=f2e3]:
+      - generic [ref=f2e5]:
+        - generic [ref=f2e6]:
+          - generic [ref=f2e7]: JWM Inventory
+          - generic [ref=f2e8]: v2.15
+        - button "Collapse sidebar" [ref=f2e9]
+      - navigation [ref=f2e11]:
+        - link "Dashboard" [ref=f2e12] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=f2e19]:
+          - paragraph [ref=f2e20]: Purchase
+          - link "Purchase Orders" [ref=f2e21] [cursor=pointer]:
+            - /url: /purchase-orders
+          - link "Inventory" [ref=f2e27] [cursor=pointer]:
+            - /url: /inventory
+        - generic [ref=f2e33]:
+          - paragraph [ref=f2e34]: Production
+          - link "Programs" [ref=f2e35] [cursor=pointer]:
+            - /url: /programs
+          - link "Planning" [ref=f2e48] [cursor=pointer]:
+            - /url: /production-planning
+          - link "Warping" [ref=f2e53] [cursor=pointer]:
+            - /url: /warping
+          - link "Roll Entry" [ref=f2e59] [cursor=pointer]:
+            - /url: /roll-entry
+          - link "FG Inventory" [ref=f2e64] [cursor=pointer]:
+            - /url: /fg-inventory
+          - link "Scrap" [ref=f2e76] [cursor=pointer]:
+            - /url: /scrap
+        - generic [ref=f2e81]:
+          - paragraph [ref=f2e82]: Sales
+          - link "Revenue" [ref=f2e83] [cursor=pointer]:
+            - /url: /revenue
+          - link "New Sales" [ref=f2e88] [cursor=pointer]:
+            - /url: /sales/new
+          - link "Enquiries" [ref=f2e92] [cursor=pointer]:
+            - /url: /enquiries
+          - link "Orders" [ref=f2e97] [cursor=pointer]:
+            - /url: /orders
+          - link "Dispatch" [ref=f2e103] [cursor=pointer]:
+            - /url: /dispatch
+          - link "Wiremesh Costing" [ref=f2e110] [cursor=pointer]:
+            - /url: /costing
+        - generic [ref=f2e114]:
+          - paragraph [ref=f2e115]: Master Data
+          - link "Min Inventory" [ref=f2e116] [cursor=pointer]:
+            - /url: /min-inventory
+          - link "Suppliers" [ref=f2e122] [cursor=pointer]:
+            - /url: /suppliers
+          - link "Customers" [ref=f2e128] [cursor=pointer]:
+            - /url: /customers
+          - link "Machines" [ref=f2e135] [cursor=pointer]:
+            - /url: /machines
+        - generic [ref=f2e139]:
+          - paragraph [ref=f2e140]: Tools
+          - link "Reports" [ref=f2e141] [cursor=pointer]:
+            - /url: /reports
+          - link "AI Workspace" [ref=f2e145] [cursor=pointer]:
+            - /url: /ai
+          - link "Feedback" [ref=f2e150] [cursor=pointer]:
+            - /url: /feedback
+    - generic [ref=f2e154]:
+      - banner [ref=f2e155]:
+        - generic [ref=f2e156]:
+          - combobox [ref=f2e160]:
+            - generic [ref=f2e161]: en
+            - img: ▼
+          - textbox [ref=f2e162]: en
+        - button "Toggle theme" [ref=f2e163]
+      - main [ref=f2e164]:
+        - generic [ref=f2e166]:
+          - generic [ref=f2e167]:
+            - generic [ref=f2e168]:
+              - heading "Machines" [level=1] [ref=f2e169]
+              - paragraph [ref=f2e170]: Manage production machines
+            - button "Add Machine" [ref=f2e172]
+          - generic [ref=f2e173]:
+            - textbox "Search machines..." [ref=f2e174]
+            - table [ref=f2e177]:
+              - rowgroup [ref=f2e178]:
+                - row [ref=f2e179]:
+                  - columnheader [ref=f2e180] [cursor=pointer]
+                  - columnheader [ref=f2e186] [cursor=pointer]
+                  - columnheader [ref=f2e192] [cursor=pointer]
+                  - columnheader [ref=f2e198] [cursor=pointer]
+                  - columnheader [ref=f2e204] [cursor=pointer]
+                  - columnheader "Actions" [ref=f2e210]
+              - rowgroup [ref=f2e212]:
+                - row [ref=f2e213]:
+                  - cell "05" [ref=f2e214]
+                  - cell "1.63 MTR WIDTH MACHINE" [ref=f2e215]
+                  - cell "2026-27" [ref=f2e216]
+                  - cell "1.3 m" [ref=f2e217]
+                  - cell "Active" [ref=f2e218]
+                  - cell [ref=f2e220]:
+                    - button
+                    - button [ref=f2e221]
+                - row [ref=f2e222]:
+                  - cell "08" [ref=f2e223]
+                  - cell "2.00 MTR WIDTH MACHINE" [ref=f2e224]
+                  - cell "2026-27" [ref=f2e225]
+                  - cell "1.5 m" [ref=f2e226]
+                  - cell "Active" [ref=f2e227]
+                  - cell [ref=f2e229]:
+                    - button
+                    - button [ref=f2e230]
+                - row [ref=f2e231]:
+                  - cell "06" [ref=f2e232]
+                  - cell "1.63 MTR WIDTH MACHINE" [ref=f2e233]
+                  - cell "2026-27" [ref=f2e234]
+                  - cell "1.3 m" [ref=f2e235]
+                  - cell "Active" [ref=f2e236]
+                  - cell [ref=f2e238]:
+                    - button
+                    - button [ref=f2e239]
+                - row [ref=f2e240]:
+                  - cell "04" [ref=f2e241]
+                  - cell "1.63 MTR WIDTH MACHINE" [ref=f2e242]
+                  - cell "2026-27" [ref=f2e243]
+                  - cell "1.3 m" [ref=f2e244]
+                  - cell "Active" [ref=f2e245]
+                  - cell [ref=f2e247]:
+                    - button
+                    - button [ref=f2e248]
+                - row [ref=f2e249]:
+                  - cell "03" [ref=f2e250]
+                  - cell "1.65 MTR WIDTH MACHINE" [ref=f2e251]
+                  - cell "2026-27" [ref=f2e252]
+                  - cell "1.3 m" [ref=f2e253]
+                  - cell "Active" [ref=f2e254]
+                  - cell [ref=f2e256]:
+                    - button
+                    - button [ref=f2e257]
+                - row [ref=f2e258]:
+                  - cell "02" [ref=f2e259]
+                  - cell "2.00 MTR WIDTH MACHINE" [ref=f2e260]
+                  - cell "2026-27" [ref=f2e261]
+                  - cell "1.3 m" [ref=f2e262]
+                  - cell "Active" [ref=f2e263]
+                  - cell [ref=f2e265]:
+                    - button
+                    - button [ref=f2e266]
+                - row [ref=f2e267]:
+                  - cell "07" [ref=f2e268]
+                  - cell "2.2.0 MTR WIDTH MACHINE" [ref=f2e269]
+                  - cell "2026-27" [ref=f2e270]
+                  - cell "1.3 m" [ref=f2e271]
+                  - cell "Active" [ref=f2e272]
+                  - cell [ref=f2e274]:
+                    - button
+                    - button [ref=f2e275]
+                - row [ref=f2e276]:
+                  - cell "01" [ref=f2e277]
+                  - cell "1.30 MTR WIDTH MACHINE" [ref=f2e278]
+                  - cell "2026-27" [ref=f2e279]
+                  - cell "1 m" [ref=f2e280]
+                  - cell "Active" [ref=f2e281]
+                  - cell [ref=f2e283]:
+                    - button
+                    - button [ref=f2e284]
+                - row [ref=f2e285]:
+                  - cell "TR" [ref=f2e286]
+                  - cell "Trading" [ref=f2e287]
+                  - cell "2026-27" [ref=f2e288]
+                  - cell "—" [ref=f2e289]
+                  - cell "Active" [ref=f2e290]
+                  - cell [ref=f2e292]:
+                    - button
+                    - button [ref=f2e293]
+            - generic [ref=f2e294]:
+              - paragraph [ref=f2e296]: Page 1 of 1
+              - generic [ref=f2e297]:
+                - button [disabled]
+                - button [disabled]
+                - button [disabled]
+                - button [disabled]
+    - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=f2e303] [cursor=pointer]

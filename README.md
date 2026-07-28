@@ -34,7 +34,10 @@ Phone (companion app) ⇄ WS: chat + preview frames ⇄ runtime (Bun)
 | [docs/architecture.md](docs/architecture.md) | How the system works: components, session lifecycle, wire protocol, security model, operations, testing, roadmap |
 | [docs/specs/2026-07-28-browserpilot-design.md](docs/specs/2026-07-28-browserpilot-design.md) | The design decisions and why they were made |
 | [docs/plans/2026-07-28-phase1-runtime-core.md](docs/plans/2026-07-28-phase1-runtime-core.md) | Task-by-task build plan for Phase 1 |
+| [docs/running-phase1.md](docs/running-phase1.md) | How to run, smoke-test, deploy, and troubleshoot the runtime |
 
 ## Status
 
-Design and Phase 1 plan complete; implementation not started. Phase 1 delivers the runtime core driven from a web debug page — sessions, headless browser with cookie-mint login, agent loop over Playwright MCP, approval gate, live preview, and downloads.
+**Phase 1 (runtime core) is built** — sessions, headless browser with cookie-mint login, the agent loop over Playwright MCP, the approval gate, live preview, downloads, a web debug page, and a Docker image. 65 tests, no model calls in the suite. See [docs/running-phase1.md](docs/running-phase1.md) to run it.
+
+Not yet done: device pairing (the runtime currently acts as one configured user and must not be exposed publicly), persistent storage, and the mobile companion app — all Phase 2.
