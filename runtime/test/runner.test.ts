@@ -284,7 +284,7 @@ describe("startAgent", () => {
 });
 
 describe("approval summaries", () => {
-  test("arbitrary code is shown, not hidden behind the tool name", async () => {
+  test("evaluate runs unblocked, but its code is shown in the activity feed", async () => {
     const fake = fakeQuery();
     const events: RobotEvent[] = [];
     const runner = await startAgent(
@@ -292,24 +292,40 @@ describe("approval summaries", () => {
       { queryFn: fake.queryFn },
     );
 
+    // It no longer asks for approval...
     const canUseTool = fake.captured.options!.canUseTool!;
-    void canUseTool(
+    const decision = await canUseTool(
       "mcp__playwright__browser_evaluate",
       { function: "() => document.documentElement.className" },
       permissionOptions(),
     );
+    expect(decision?.behavior).toBe("allow");
+    expect(events.some((e) => e.type === "approval_request")).toBe(false);
+
+    // ...but the user can still see exactly what ran.
+    fake.push({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_2",
+            name: "mcp__playwright__browser_evaluate",
+            input: { function: "() => document.documentElement.className" },
+          },
+        ],
+      },
+    });
     await Bun.sleep(20);
 
-    const request = events.find((e) => e.type === "approval_request");
-    if (request?.type !== "approval_request") throw new Error("no approval requested");
-    // Someone approving must be able to see what would run.
-    expect(request.summary).toContain("document.documentElement.className");
+    const activity = events.find((e) => e.type === "tool_activity");
+    if (activity?.type !== "tool_activity") throw new Error("no activity reported");
+    expect(activity.summary).toContain("document.documentElement.className");
 
-    runner.approve(request.requestId, false);
     await runner.stop();
   });
 
-  test("long code is truncated rather than flooding the card", async () => {
+  test("long code is truncated rather than flooding the feed", async () => {
     const fake = fakeQuery();
     const events: RobotEvent[] = [];
     const runner = await startAgent(
@@ -317,20 +333,26 @@ describe("approval summaries", () => {
       { queryFn: fake.queryFn },
     );
 
-    const canUseTool = fake.captured.options!.canUseTool!;
-    void canUseTool(
-      "mcp__playwright__browser_evaluate",
-      { function: `() => { ${"const x = 1; ".repeat(60)} }` },
-      permissionOptions(),
-    );
+    fake.push({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_3",
+            name: "mcp__playwright__browser_evaluate",
+            input: { function: `() => { ${"const x = 1; ".repeat(60)} }` },
+          },
+        ],
+      },
+    });
     await Bun.sleep(20);
 
-    const request = events.find((e) => e.type === "approval_request");
-    if (request?.type !== "approval_request") throw new Error("no approval requested");
-    expect(request.summary.length).toBeLessThan(200);
-    expect(request.summary).toEndWith("…");
+    const activity = events.find((e) => e.type === "tool_activity");
+    if (activity?.type !== "tool_activity") throw new Error("no activity reported");
+    expect(activity.summary.length).toBeLessThan(200);
+    expect(activity.summary).toEndWith("…");
 
-    runner.approve(request.requestId, false);
     await runner.stop();
   });
 
