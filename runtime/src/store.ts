@@ -120,6 +120,21 @@ export class Store {
     return row ?? null;
   }
 
+  /**
+   * Who owns a session, whether or not it is still running.
+   *
+   * Downloads outlive their session on disk, so serving them cannot depend on
+   * the in-memory registry — but it must still be an ownership check.
+   */
+  async sessionOwner(sessionId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ userId: robotSessions.userId })
+      .from(robotSessions)
+      .where(eq(robotSessions.id, sessionId))
+      .limit(1);
+    return row?.userId ?? null;
+  }
+
   async liveSessionCount(userId?: string): Promise<number> {
     const live = inArray(robotSessions.status, [...LIVE_STATUSES]);
     const [row] = await this.db

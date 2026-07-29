@@ -35,6 +35,7 @@ const { server } = createServer(manager, {
   port: config.port,
   ticketSecret: config.ticketSecret,
   store,
+  downloadsRoot: config.downloadsRoot,
 });
 
 setInterval(() => void manager.sweep().catch(() => {}), 30_000);

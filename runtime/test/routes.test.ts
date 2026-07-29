@@ -25,7 +25,12 @@ afterAll(async () => {
 function start() {
   const { deps, state } = fakeDeps();
   const manager = new SessionManager(managerConfig, deps);
-  const handle = createServer(manager, { port: 0, ticketSecret: TICKET_SECRET, store });
+  const handle = createServer(manager, {
+    port: 0,
+    ticketSecret: TICKET_SECRET,
+    store,
+    downloadsRoot: managerConfig.downloadsRoot,
+  });
   running = handle;
   return { manager, state, port: handle.server.port };
 }
@@ -285,5 +290,49 @@ describe("model selection", () => {
     expect(res.status).toBe(200);
     const { id } = (await res.json()) as { id: string };
     await manager.stop(id);
+  });
+});
+
+describe("downloads outlive their session", () => {
+  test("a file from a stopped session is still served to its owner", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    // Put a file where the session's downloads live, then end the session.
+    const dir = `${managerConfig.downloadsRoot}/${id}`;
+    await Bun.write(`${dir}/report.pdf`, "%PDF-1.4 fake");
+    await manager.stop(id);
+    expect(manager.get(id)).toBeUndefined();
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/files/report.pdf`, {
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.userId)}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("%PDF");
+  });
+
+  test("someone else still cannot fetch it", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    await Bun.write(`${managerConfig.downloadsRoot}/${id}/private.pdf`, "%PDF-1.4 secret");
+    await manager.stop(id);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/files/private.pdf`, {
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.otherUserId)}` },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("a path-traversal filename cannot escape the session directory", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    await manager.stop(id);
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/sessions/${id}/files/${encodeURIComponent("../../etc/passwd")}`,
+      { headers: { authorization: `Bearer ${await ticketFor(id, fx.userId)}` } },
+    );
+    expect(res.status).toBe(404);
   });
 });

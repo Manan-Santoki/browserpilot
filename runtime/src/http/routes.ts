@@ -16,6 +16,8 @@ export type ServerOptions = {
   port: number;
   ticketSecret: string;
   store: Store;
+  /** Where per-session download directories live. */
+  downloadsRoot: string;
 };
 
 const json = (body: unknown, status = 200) =>
@@ -147,13 +149,26 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
 
       const fileMatch = /^\/api\/sessions\/([^/]+)\/files\/(.+)$/.exec(path);
       if (fileMatch && req.method === "GET") {
-        const session = manager.get(fileMatch[1]!);
-        if (!session) return json({ error: "No such session" }, 404);
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
-          return json({ error: "Not your session" }, 403);
+        const sessionId = fileMatch[1]!;
+        const live = manager.get(sessionId);
+
+        // A finished session still has its files on disk, so fall back to the
+        // database for ownership rather than refusing everything after a stop.
+        if (live) {
+          if (!manager.canAccess(live, claims.userId, claims.role)) {
+            return json({ error: "Not your session" }, 403);
+          }
+        } else {
+          const ownerId = await opts.store.sessionOwner(sessionId);
+          if (!ownerId) return json({ error: "No such session" }, 404);
+          if (claims.role !== "ADMIN" && ownerId !== claims.userId) {
+            return json({ error: "Not your session" }, 403);
+          }
         }
+
         // basename() keeps a crafted filename from escaping the session's dir.
-        const file = Bun.file(join(session.browser.downloadsDir, basename(fileMatch[2]!)));
+        const dir = live?.browser.downloadsDir ?? join(opts.downloadsRoot, sessionId);
+        const file = Bun.file(join(dir, basename(fileMatch[2]!)));
         if (!(await file.exists())) return json({ error: "No such file" }, 404);
         return new Response(file);
       }
