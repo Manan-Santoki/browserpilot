@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { StatusLabel } from "@/components/status-lamp";
+import { AgentMarkdown } from "@/components/agent-markdown";
 import { PushToTalk } from "./push-to-talk";
 
 import type { ChatItem } from "@/lib/transcript";
@@ -227,11 +228,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
               );
             }
             if (item.kind === "agent") {
-              return (
-                <p key={i} className="whitespace-pre-wrap">
-                  {item.text}
-                </p>
-              );
+              return <AgentMarkdown key={i}>{item.text}</AgentMarkdown>;
             }
             if (item.kind === "tool") {
               // The activity feed is a machine log, so it is set as one — mono,

@@ -1,3 +1,4 @@
+import { AgentMarkdown } from "@/components/agent-markdown";
 import type { ChatItem } from "@/lib/transcript";
 
 /**
@@ -27,11 +28,7 @@ export function TranscriptView({ items }: { items: ChatItem[] }) {
           );
         }
         if (item.kind === "agent") {
-          return (
-            <p key={i} className="whitespace-pre-wrap">
-              {item.text}
-            </p>
-          );
+          return <AgentMarkdown key={i}>{item.text}</AgentMarkdown>;
         }
         if (item.kind === "tool") {
           return (

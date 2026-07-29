@@ -4,7 +4,19 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { inviteUser, type AdminState } from "../actions";
+
+const ROLES = [
+  { value: "USER", label: "User" },
+  { value: "ADMIN", label: "Admin" },
+];
 
 const initial: AdminState = {};
 
@@ -29,15 +41,18 @@ export function InviteForm() {
         <Label htmlFor="role">
           Role
         </Label>
-        <select
-          id="role"
-          name="role"
-          defaultValue="USER"
-          className="border-input bg-background focus-visible:ring-ring/50 rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-3"
-        >
-          <option value="USER">User</option>
-          <option value="ADMIN">Admin</option>
-        </select>
+        <Select name="role" defaultValue="USER" items={ROLES}>
+          <SelectTrigger id="role" className="w-[160px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ROLES.map((role) => (
+              <SelectItem key={role.value} value={role.value}>
+                {role.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {state.error ? (
