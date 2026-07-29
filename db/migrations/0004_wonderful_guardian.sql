@@ -1,0 +1,1 @@
+ALTER TABLE "site_accounts" ADD COLUMN "cookies_encrypted" text;

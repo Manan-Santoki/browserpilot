@@ -1,5 +1,8 @@
+import { rm } from "node:fs/promises";
 import { credentialEnv, loadConfig } from "./config";
 import { launchRobotBrowser } from "./browser/chromium";
+import { createInputSink } from "./browser/input";
+import { createProfileStore } from "./browser/profiles";
 import { startScreencast } from "./browser/screencast";
 import { startAgent } from "./agent/runner";
 import { SessionManager } from "./session/manager";
@@ -16,18 +19,27 @@ if (orphaned > 0) {
   console.log(`Marked ${orphaned} session(s) interrupted after restart.`);
 }
 
+// Copies of saved profiles from a previous run are useless — their sessions
+// died with the process — and they are the largest thing on the disk.
+await rm(config.scratchRoot, { recursive: true, force: true }).catch(() => {});
+
+const profiles = createProfileStore(config.profilesRoot);
+
 const manager = new SessionManager(
   {
     downloadsRoot: config.downloadsRoot,
+    scratchRoot: config.scratchRoot,
     env: credentialEnv(config),
     nodeBin: config.nodeBin,
   },
   {
     store,
+    profiles,
     now: () => Date.now(),
     launchBrowser: launchRobotBrowser,
     startAgent: (args) => startAgent(args),
-    startScreencast: (page, onFrame) => startScreencast(page, onFrame),
+    startScreencast: (context, onFrame, opts) => startScreencast(context, onFrame, opts),
+    createInput: (page) => createInputSink(page),
   },
 );
 

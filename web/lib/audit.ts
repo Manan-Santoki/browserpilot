@@ -12,6 +12,10 @@ export type AuditAction =
   | "site.created"
   | "site.updated"
   | "site.deleted"
+  // Signing in to a target site by hand. Records that it happened and against
+  // which site — never anything that was typed.
+  | "site.login_started"
+  | "site.login_saved"
   | "session.started"
   | "session.stopped"
   | "session.approval"

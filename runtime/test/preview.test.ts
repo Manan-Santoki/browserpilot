@@ -39,6 +39,58 @@ describe("live preview", () => {
     await manager.stop(id);
   });
 
+  test("a client that connects late is shown the last frame at once", async () => {
+    // Otherwise a reload leaves the panel empty until the page next repaints —
+    // for a browser sitting on a finished form, that is indefinitely.
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    await manager.setPreview(id, true);
+    state.pushFrame!("/9j/first");
+    state.pushFrame!("/9j/newest");
+
+    const late: string[] = [];
+    manager.subscribeFrames(id, (f) => late.push(f));
+
+    expect(late).toEqual(["/9j/newest"]);
+    await manager.stop(id);
+  });
+
+  test("restarting the browser drops the cached frame", async () => {
+    // It shows a browser that no longer exists.
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    await manager.setPreview(id, true);
+    state.pushFrame!("/9j/stale");
+    await manager.restartBrowser(id);
+
+    const late: string[] = [];
+    manager.subscribeFrames(id, (f) => late.push(f));
+
+    expect(late).toEqual([]);
+    await manager.stop(id);
+  });
+
+  test("preview_state tells subscribers whether frames are flowing", async () => {
+    const { deps } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    const events: string[] = [];
+    manager.subscribe(id, (e) => {
+      if (e.type === "preview_state") events.push(String(e.enabled));
+    });
+
+    await manager.setPreview(id, true);
+    await manager.setPreview(id, false);
+
+    expect(events).toEqual(["true", "false"]);
+    await manager.stop(id);
+  });
+
   test("disabling preview stops the screencast", async () => {
     const { deps, state } = fakeDeps();
     const manager = new SessionManager(managerConfig, deps);

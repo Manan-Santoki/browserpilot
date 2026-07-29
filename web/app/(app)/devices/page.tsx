@@ -24,7 +24,7 @@ export default async function DevicesPage() {
   const active = devices.filter((d) => !d.revokedAt);
 
   return (
-    <div className="space-y-10">
+    <div className="mx-auto w-full max-w-6xl space-y-10">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Devices</h1>
         <p className="mt-1 text-sm text-muted-foreground">

@@ -33,7 +33,9 @@ async function call<T>(
   user: CurrentUser,
   path: string,
   init: RequestInit & { sessionId?: string } = {},
-): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string }> {
+): Promise<
+  { ok: true; data: T } | { ok: false; status: number; error: string; code?: string }
+> {
   const ticket = await ticketFor(user, init.sessionId ?? "pending");
 
   let response: Response;
@@ -59,6 +61,7 @@ async function call<T>(
       ok: false,
       status: response.status,
       error: typeof body.error === "string" ? body.error : `Request failed (${response.status})`,
+      code: typeof body.code === "string" ? body.code : undefined,
     };
   }
   return { ok: true, data: body as T };
@@ -77,6 +80,22 @@ export function startRuntimeSession(
   return call<{ id: string }>(user, "/api/sessions", {
     method: "POST",
     body: JSON.stringify({ siteProfileId, title, model }),
+  });
+}
+
+/** Open a browser for the person to sign in to a site themselves. */
+export function startRuntimeLogin(user: CurrentUser, siteProfileId: string) {
+  return call<{ id: string }>(user, "/api/logins", {
+    method: "POST",
+    body: JSON.stringify({ siteProfileId }),
+  });
+}
+
+/** Keep the profile the sign-in produced, and close its browser. */
+export function saveRuntimeLogin(user: CurrentUser, sessionId: string) {
+  return call<{ ok: boolean }>(user, `/api/logins/${sessionId}/save`, {
+    method: "POST",
+    sessionId,
   });
 }
 

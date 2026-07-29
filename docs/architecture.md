@@ -89,12 +89,14 @@ Two things are deliberately constrained:
 
 The agent reads pages primarily through the **accessibility tree** (`browser_snapshot`), not screenshots. This is faster, an order of magnitude cheaper in tokens, and more reliable for form-filling than pixel-based vision. Screenshots are taken when the user asks to see something, or when structure alone is insufficient.
 
+The runtime strips the `filename` argument from `browser_take_screenshot` before the call runs. Playwright MCP returns the picture inline only when no filename is given; with one it writes the file into its own output directory — which nothing on our side can reach — and hands back a path. The result was that a screenshot reached neither the person who asked for it nor the model that took it, leaving the agent to describe the page from an older snapshot. With the argument dropped, the image comes back, is saved beside the session's downloads, and is announced with `screenshot`.
+
 ### 3.3 The browser
 
 One headless Chromium per session, launched by Playwright with `--remote-debugging-port`. Three consumers attach to that one browser:
 
 1. **Playwright MCP** connects over CDP (`--cdp-endpoint`) and exposes the tools the agent calls. It is spawned as `node <resolved @playwright/mcp/cli.js>` — **not** `bunx`/`npx`. Playwright's `connectOverCDP` never completes its WebSocket handshake under Bun, and MCP's response to a failed attach is to quietly launch its own browser: one with no session cookie and none of our pages, so the agent appears to work while operating a logged-out stranger. Resolving the CLI from our own `node_modules` also keeps session startup offline.
-2. **The screencast** uses a CDP session on the page to stream JPEG frames for the live preview. Chromium only emits a frame when the page repaints, so the runtime pushes one captured frame at start — otherwise opening the preview on an idle page shows nothing at all.
+2. **The screencast** streams JPEG frames for the live preview, over a CDP session attached to *every* page in the context rather than to one page. The agent opens and switches tabs as it works, and a stream pinned to a single page shows a still photograph of an abandoned tab the moment it moves on — indistinguishable, to whoever is watching, from the robot freezing. Frames are forwarded from whichever tab is painting, switching only once the watched one has gone quiet so two live tabs cannot trade the panel back and forth. Chromium emits frames only on repaint, so a heartbeat captures one on demand when the page has been still for a second; without it a static business page delivers roughly 0.3 frames per second. A frames-per-second ceiling coalesces the opposite case, always keeping the newest frame, so an animated page cannot spend bandwidth faster than anyone can watch.
 3. **The download hook** captures files the agent downloads into a per-session directory.
 
 The session's cookie is injected into the browser context *before* the first navigation, so the very first page load is already authenticated.
@@ -137,6 +139,8 @@ One WebSocket per session at `/ws/:sessionId`, carrying two lanes.
 | `approval_request` | `requestId`, `tool`, `summary` | Blocking; the agent is suspended until answered. |
 | `approval_resolved` | `requestId`, `approved` | Confirmation, so late-joining clients can clear the card. |
 | `file_ready` | `fileId`, `filename`, `url` | A download completed and is fetchable at `url`. |
+| `screenshot` | `filename`, `url` | A picture the agent took, to be shown in the conversation rather than linked. |
+| `preview_state` | `enabled` | Whether frames are flowing. Sent once on connect and on every change. |
 | `error` | `message` | Something failed, in plain language. |
 
 ### Server → client (binary frames)
@@ -152,7 +156,9 @@ Raw JPEG bytes — one live preview frame. Sent only while preview is enabled. C
 | `preview` | `enabled` | Starts/stops the screencast for this session. |
 | `stop` | — | Ends the session. |
 
-**Preview is opt-in and cheap to toggle** because the screencast is only started when a client asks for it. A session with no one watching costs nothing in frame encoding or bandwidth.
+**Preview is on by default and cheap to stop** — the console asks for it as soon as the socket opens, because a panel you have to switch on is a panel that looks dead. The screencast still only runs while some client wants it, so a session nobody is watching costs nothing in frame encoding or bandwidth. `preview_state` on connect is what keeps a reconnecting client's switch honest about a session that was already streaming.
+
+**The newest frame is cached** and replayed to whoever subscribes next, so opening or reloading the console paints immediately instead of waiting for a repaint that, on a browser sitting at a finished form, never comes.
 
 ---
 

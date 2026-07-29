@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* A left rail rather than a top bar: a console is navigated rarely and
           watched constantly, so navigation should sit out of the way. */}
       <aside className="bg-sidebar hidden w-56 shrink-0 flex-col border-r md:flex">
@@ -92,7 +92,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </nav>
         </header>
 
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
+        <main className="w-full min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
           {children}
         </main>
       </div>

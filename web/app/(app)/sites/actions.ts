@@ -67,12 +67,20 @@ export async function createSite(_prev: FormState, formData: FormData): Promise<
 
   const name = String(formData.get("name") ?? "").trim();
   const baseUrl = String(formData.get("baseUrl") ?? "").trim().replace(/\/+$/, "");
-  const cookieName = String(formData.get("cookieName") ?? "").trim();
+  const cookieName = String(formData.get("cookieName") ?? "").trim() || "session";
   const secret = String(formData.get("secret") ?? "");
   const notes = String(formData.get("notes") ?? "").trim();
+  const loggedOutPattern = String(formData.get("loggedOutPattern") ?? "").trim();
 
-  if (!name || !baseUrl || !cookieName) {
-    return { error: "Name, URL and cookie name are all required." };
+  // Two ways in: forge a session with the target's own signing secret, or have
+  // each person sign in themselves once and keep the browser profile.
+  const strategy =
+    String(formData.get("loginStrategy") ?? "") === "persistent_profile"
+      ? ("persistent_profile" as const)
+      : ("cookie_mint" as const);
+
+  if (!name || !baseUrl) {
+    return { error: "Name and URL are both required." };
   }
 
   try {
@@ -81,7 +89,7 @@ export async function createSite(_prev: FormState, formData: FormData): Promise<
     return { error: "That does not look like a valid URL." };
   }
 
-  if (!secret) {
+  if (strategy === "cookie_mint" && !secret) {
     return {
       error:
         "A signing secret is required for cookie-mint login. It must match the target application's own session secret.",
@@ -101,8 +109,10 @@ export async function createSite(_prev: FormState, formData: FormData): Promise<
       name,
       baseUrl,
       cookieName,
+      loginStrategy: strategy,
       // Sealed before it touches the table; the database alone never yields it.
-      secretEncrypted: encryptSecret(secret, masterKey()),
+      secretEncrypted: secret ? encryptSecret(secret, masterKey()) : null,
+      loggedOutPattern: loggedOutPattern || null,
       systemPromptNotes: notes || null,
       createdById: admin.id,
     })
@@ -113,11 +123,16 @@ export async function createSite(_prev: FormState, formData: FormData): Promise<
     action: "site.created",
     targetType: "site",
     targetId: site!.id,
-    metadata: { name, baseUrl },
+    metadata: { name, baseUrl, loginStrategy: strategy },
   });
 
   revalidatePath("/sites");
-  return { success: `Registered ${name}. Add your account on it to start sessions.` };
+  return {
+    success:
+      strategy === "persistent_profile"
+        ? `Registered ${name}. Sign in to it once and the robot can use it from then on.`
+        : `Registered ${name}. Add your account on it to start sessions.`,
+  };
 }
 
 /**

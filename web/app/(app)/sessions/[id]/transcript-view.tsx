@@ -57,6 +57,18 @@ export function TranscriptView({ items }: { items: ChatItem[] }) {
             </p>
           );
         }
+        if (item.kind === "screenshot") {
+          return (
+            <a key={i} href={item.url} target="_blank" rel="noreferrer" className="block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={item.url}
+                alt={`Screenshot of the page — ${item.filename}`}
+                className="max-h-72 w-auto rounded-lg border transition-opacity hover:opacity-90"
+              />
+            </a>
+          );
+        }
         return (
           <p key={i} className="text-signal font-mono text-xs">
             {item.summary} — {item.resolved ?? "never answered"}

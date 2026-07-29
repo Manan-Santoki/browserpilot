@@ -117,6 +117,9 @@ describe("site accounts", () => {
       targetEmail: "person@target.test",
       targetName: "Person On Target",
       targetRole: "admin",
+      // A cookie_mint account needs no saved login of its own.
+      linkState: "none",
+      cookies: null,
     });
   });
 

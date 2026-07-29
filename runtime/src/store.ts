@@ -1,5 +1,5 @@
-import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
-import { decryptSecret } from "@browserpilot/core";
+import { and, asc, count, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { decryptSecret, encryptSecret } from "@browserpilot/core";
 import {
   createDatabase,
   robotSessions,
@@ -10,11 +10,15 @@ import {
   users,
   type Database,
 } from "@browserpilot/db";
+import type { SavedCookie } from "./browser/chromium";
 import type { RobotEvent, SessionStatus } from "./session/events";
 import { parseSettings, type RuntimeSettings } from "./settings";
 
 /** Statuses that count as "still holding a browser" for the concurrency caps. */
 export const LIVE_STATUSES = ["starting", "idle", "working", "awaiting_approval"] as const;
+
+/** Once a session reaches one of these it is over, and stays over. */
+export const TERMINAL_STATUSES = ["stopped", "failed", "interrupted"] as const;
 
 export type TargetSite = {
   id: string;
@@ -22,6 +26,8 @@ export type TargetSite = {
   baseUrl: string;
   loginStrategy: "cookie_mint" | "persistent_profile" | "manual_login";
   cookieName: string;
+  /** Marks a page as signed out, for saved logins that have expired. */
+  loggedOutPattern: string | null;
   /** Decrypted only in memory, only when a session starts. */
   secret: string | null;
   systemPromptNotes: string | null;
@@ -35,12 +41,21 @@ export type SessionOwner = {
   role: string;
 };
 
-/** The identity the robot presents to the target site. */
+/**
+ * How this person reaches the target site.
+ *
+ * A cookie_mint site needs the identity to forge. A saved-login site needs
+ * none of that — the profile on disk already holds a real session — so only
+ * `linkState` matters there.
+ */
 export type TargetAccount = {
-  targetUserId: string;
-  targetEmail: string;
-  targetName: string;
-  targetRole: string;
+  targetUserId: string | null;
+  targetEmail: string | null;
+  targetName: string | null;
+  targetRole: string | null;
+  linkState: "none" | "linked" | "expired";
+  /** Decrypted only in memory, only when a session starts. */
+  cookies: SavedCookie[] | null;
 };
 
 export class Store {
@@ -76,6 +91,7 @@ export class Store {
       baseUrl: row.baseUrl,
       loginStrategy: row.loginStrategy,
       cookieName: row.cookieName,
+      loggedOutPattern: row.loggedOutPattern,
       secret: row.secretEncrypted ? decryptSecret(row.secretEncrypted, this.masterKey) : null,
       systemPromptNotes: row.systemPromptNotes,
       destructivePatterns: row.destructivePatterns,
@@ -112,12 +128,36 @@ export class Store {
         targetEmail: siteAccounts.targetEmail,
         targetName: siteAccounts.targetName,
         targetRole: siteAccounts.targetRole,
+        linkState: siteAccounts.linkState,
+        cookiesEncrypted: siteAccounts.cookiesEncrypted,
       })
       .from(siteAccounts)
       .where(and(eq(siteAccounts.userId, userId), eq(siteAccounts.siteProfileId, siteProfileId)))
       .limit(1);
 
-    return row ?? null;
+    if (!row) return null;
+
+    const { cookiesEncrypted, ...account } = row;
+    let cookies: SavedCookie[] | null = null;
+    if (cookiesEncrypted) {
+      try {
+        cookies = JSON.parse(decryptSecret(cookiesEncrypted, this.masterKey)) as SavedCookie[];
+      } catch {
+        // A profile that cannot be unsealed is a profile that must be redone,
+        // which the person will be told when the target bounces them.
+        cookies = null;
+      }
+    }
+
+    return { ...account, cookies };
+  }
+
+  /** Keep the cookies a sign-in produced, sealed with the master key. */
+  async saveCookies(userId: string, siteProfileId: string, cookies: SavedCookie[]): Promise<void> {
+    await this.db
+      .update(siteAccounts)
+      .set({ cookiesEncrypted: encryptSecret(JSON.stringify(cookies), this.masterKey) })
+      .where(and(eq(siteAccounts.userId, userId), eq(siteAccounts.siteProfileId, siteProfileId)));
   }
 
   /**
@@ -148,6 +188,7 @@ export class Store {
     userId: string;
     siteProfileId: string;
     title?: string;
+    kind?: "agent" | "login";
   }): Promise<string> {
     const [row] = await this.db
       .insert(robotSessions)
@@ -156,13 +197,43 @@ export class Store {
         siteProfileId: input.siteProfileId,
         status: "starting",
         title: input.title ?? null,
+        kind: input.kind ?? "agent",
       })
       .returning({ id: robotSessions.id });
     return row!.id;
   }
 
+  /** Record whether this person currently holds a working login for a site. */
+  async setLinkState(
+    userId: string,
+    siteProfileId: string,
+    state: "none" | "linked" | "expired",
+  ): Promise<void> {
+    await this.db
+      .update(siteAccounts)
+      .set({ linkState: state, linkedAt: state === "linked" ? new Date() : null })
+      .where(and(eq(siteAccounts.userId, userId), eq(siteAccounts.siteProfileId, siteProfileId)));
+  }
+
+  /** Note that a finished session wrote its session state back to the profile. */
+  async markSynced(userId: string, siteProfileId: string): Promise<void> {
+    await this.db
+      .update(siteAccounts)
+      .set({ lastSyncedAt: new Date() })
+      .where(and(eq(siteAccounts.userId, userId), eq(siteAccounts.siteProfileId, siteProfileId)));
+  }
+
+  /**
+   * Move a session to a new status, unless it has already finished.
+   *
+   * A restarting runtime declares the previous run's sessions interrupted, but
+   * the process it replaced can still be alive for a moment and still writing.
+   * Without this guard those writes put a dead session back into a live status
+   * while its endedAt stayed set — a row no sweep would look at again and no
+   * stop request could reach, because no runtime held it any more.
+   */
   async setStatus(sessionId: string, status: SessionStatus, reason?: string): Promise<void> {
-    const ended = status === "stopped" || status === "failed" || status === "interrupted";
+    const ended = TERMINAL_STATUSES.includes(status as (typeof TERMINAL_STATUSES)[number]);
     await this.db
       .update(robotSessions)
       .set({
@@ -170,7 +241,33 @@ export class Store {
         lastActivityAt: new Date(),
         ...(ended ? { endedAt: new Date(), endedReason: reason ?? null } : {}),
       })
-      .where(eq(robotSessions.id, sessionId));
+      .where(
+        and(
+          eq(robotSessions.id, sessionId),
+          notInArray(robotSessions.status, [...TERMINAL_STATUSES]),
+        ),
+      );
+  }
+
+  /**
+   * End a session the runtime no longer holds.
+   *
+   * Whatever the reason a browser went away — a restart, a crash — the row it
+   * left behind is one a person still sees as running, and it counts against
+   * their concurrency limit. They must always be able to clear it.
+   */
+  async forceStop(sessionId: string, reason: string): Promise<boolean> {
+    const rows = await this.db
+      .update(robotSessions)
+      .set({ status: "stopped", endedAt: new Date(), endedReason: reason })
+      .where(
+        and(
+          eq(robotSessions.id, sessionId),
+          inArray(robotSessions.status, [...LIVE_STATUSES]),
+        ),
+      )
+      .returning({ id: robotSessions.id });
+    return rows.length > 0;
   }
 
   async touch(sessionId: string): Promise<void> {
@@ -219,7 +316,7 @@ export class Store {
         endedAt: new Date(),
         endedReason: "runtime restarted",
       })
-      .where(and(inArray(robotSessions.status, [...LIVE_STATUSES]), isNull(robotSessions.endedAt)))
+      .where(inArray(robotSessions.status, [...LIVE_STATUSES]))
       .returning({ id: robotSessions.id });
     return rows.length;
   }

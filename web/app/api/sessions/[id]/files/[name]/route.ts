@@ -55,10 +55,16 @@ export async function GET(
     );
   }
 
+  const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
+
+  // Screenshots are shown in the conversation and opened full size from it, so
+  // forcing a download on them would turn a look at the page into a saved file.
+  const disposition = contentType.startsWith("image/") ? "inline" : "attachment";
+
   return new NextResponse(upstream.body, {
     headers: {
-      "content-type": upstream.headers.get("content-type") ?? "application/octet-stream",
-      "content-disposition": `attachment; filename="${name.replace(/"/g, "")}"`,
+      "content-type": contentType,
+      "content-disposition": `${disposition}; filename="${name.replace(/"/g, "")}"`,
       "cache-control": "private, no-store",
     },
   });

@@ -21,7 +21,7 @@ export default async function AccountPage() {
   const user = await requireUser();
 
   return (
-    <div className="max-w-lg space-y-10">
+    <div className="mx-auto w-full max-w-6xl max-w-lg space-y-10">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Account</h1>
         <p className="mt-1 text-sm text-muted-foreground">

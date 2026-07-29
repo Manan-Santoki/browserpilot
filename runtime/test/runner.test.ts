@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildSystemPrompt } from "../src/agent/prompt";
 import { startAgent, type QueryFn } from "../src/agent/runner";
@@ -20,6 +23,7 @@ const SITE = {
   name: "Example ERP",
   baseUrl: "https://target.example.com",
   loginStrategy: "cookie_mint" as const,
+  loggedOutPattern: null,
   cookieName: "target-session",
   secret: "sekret",
   systemPromptNotes: "Purchase orders live at /purchase-orders.",
@@ -31,6 +35,9 @@ const OPTS = {
   site: SITE,
   model: "claude-opus-5",
   env: { CLAUDE_CODE_OAUTH_TOKEN: "t" },
+  sessionId: "sess-1",
+  // Overridden by the tests that actually write a screenshot.
+  filesDir: "/tmp/bp-runner-files",
 };
 
 /** Captures what the runner passed to the SDK and lets the test drive messages back. */
@@ -279,6 +286,123 @@ describe("startAgent", () => {
     const first = await iterator.next();
 
     expect(first.value!.message.content).toBe("create a PO for KEI");
+    await runner.stop();
+  });
+});
+
+describe("screenshots", () => {
+  /** A tool result carrying an image, the way MCP returns one. */
+  const toolResultImage = (data: string, mediaType = "image/png") => ({
+    type: "user",
+    message: {
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "tu_1",
+          content: [{ type: "image", source: { type: "base64", media_type: mediaType, data } }],
+        },
+      ],
+    },
+  });
+
+  // A one-pixel PNG, so the bytes on disk can be compared exactly.
+  const PIXEL =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  test("a screenshot tool result is saved and announced with a URL", async () => {
+    const filesDir = await mkdtemp(join(tmpdir(), "bp-shots-"));
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, filesDir, sessionId: "sess-42", onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    fake.push(toolResultImage(PIXEL));
+    await Bun.sleep(50);
+
+    const shot = events.find((e) => e.type === "screenshot");
+    if (shot?.type !== "screenshot") throw new Error("no screenshot event");
+    expect(shot.filename).toBe("screenshot-1.png");
+    expect(shot.url).toBe("/api/sessions/sess-42/files/screenshot-1.png");
+
+    // The bytes have to actually be there — the URL is a promise to serve them.
+    const written = await readFile(join(filesDir, shot.filename));
+    expect(written).toEqual(Buffer.from(PIXEL, "base64"));
+
+    await runner.stop();
+    await rm(filesDir, { recursive: true, force: true });
+  });
+
+  test("each screenshot gets its own name, and the type decides the extension", async () => {
+    const filesDir = await mkdtemp(join(tmpdir(), "bp-shots-"));
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, filesDir, onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    fake.push(toolResultImage(PIXEL));
+    fake.push(toolResultImage(PIXEL, "image/jpeg"));
+    await Bun.sleep(50);
+
+    const names = events.filter((e) => e.type === "screenshot").map((e) => e.filename);
+    expect(names).toEqual(["screenshot-1.png", "screenshot-2.jpg"]);
+
+    await runner.stop();
+    await rm(filesDir, { recursive: true, force: true });
+  });
+
+  test("a tool result with no image produces no screenshot", async () => {
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    fake.push({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: [{ type: "text", text: "ok" }] }],
+      },
+    });
+    await Bun.sleep(30);
+
+    expect(events.some((e) => e.type === "screenshot")).toBe(false);
+    await runner.stop();
+  });
+
+  test("the filename argument is stripped so MCP returns the image itself", async () => {
+    // With a filename, Playwright MCP writes the file into its own output
+    // directory and hands back a path — the picture reaches neither the user
+    // nor the model, which then describes the page from an older snapshot.
+    const fake = fakeQuery();
+    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+
+    const canUseTool = fake.captured.options!.canUseTool!;
+    const result = await canUseTool(
+      "mcp__playwright__browser_take_screenshot",
+      { type: "png", scale: "css", filename: "dashboard.png" },
+      permissionOptions(),
+    );
+
+    if (result?.behavior !== "allow") throw new Error("screenshots must not need approval");
+    expect(result.updatedInput).toEqual({ type: "png", scale: "css" });
+    await runner.stop();
+  });
+
+  test("other tools keep every argument they were given", async () => {
+    const fake = fakeQuery();
+    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+
+    const canUseTool = fake.captured.options!.canUseTool!;
+    const input = { element: "Save", filename: "not-a-screenshot.png" };
+    const result = await canUseTool("mcp__playwright__browser_click", input, permissionOptions());
+
+    if (result?.behavior !== "allow") throw new Error("expected a plain click to be allowed");
+    expect(result.updatedInput).toEqual(input);
     await runner.stop();
   });
 });

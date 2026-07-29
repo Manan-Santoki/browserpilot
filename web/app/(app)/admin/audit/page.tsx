@@ -13,6 +13,8 @@ const PHRASING: Record<string, string> = {
   "user.updated": "changed a user",
   "site.created": "registered a site",
   "site.updated": "updated a site",
+  "site.login_started": "began signing in to a site",
+  "site.login_saved": "saved a sign-in for a site",
   "site.deleted": "removed a site",
   "session.started": "started a session",
   "session.stopped": "stopped a session",
@@ -40,7 +42,7 @@ export default async function AuditPage() {
     .limit(200);
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Audit log</h1>
         <p className="mt-1 text-sm text-muted-foreground">

@@ -19,6 +19,16 @@ export const loginStrategy = pgEnum("login_strategy", [
   "manual_login",
 ]);
 
+/** How far a person has got with signing in to a target site themselves. */
+export const linkState = pgEnum("link_state", ["none", "linked", "expired"]);
+
+/**
+ * An agent session drives a site; a login session is the person driving it
+ * themselves to sign in. Both are real browsers with a live preview, so they
+ * share the session machinery — a login session simply has no agent attached.
+ */
+export const sessionKind = pgEnum("session_kind", ["agent", "login"]);
+
 export const sessionStatus = pgEnum("session_status", [
   "starting",
   "idle",
@@ -101,6 +111,12 @@ export const siteProfiles = pgTable(
     /** Session cookie name the target application reads. */
     cookieName: text("cookie_name").notNull().default("session"),
     secretEncrypted: text("secret_encrypted"),
+    /**
+     * Marks a page as "you are signed out". A stored login eventually expires,
+     * and the only signal the target gives is bouncing back to its login page.
+     * Substring or regex; when absent a set of common defaults is used.
+     */
+    loggedOutPattern: text("logged_out_pattern"),
     systemPromptNotes: text("system_prompt_notes"),
     destructivePatterns: jsonb("destructive_patterns").$type<string[]>(),
     isActive: boolean("is_active").notNull().default(true),
@@ -129,11 +145,29 @@ export const siteAccounts = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** The identifier the target site uses — typically its own user UUID. */
-    targetUserId: text("target_user_id").notNull(),
-    targetEmail: text("target_email").notNull(),
-    targetName: text("target_name").notNull(),
-    targetRole: text("target_role").notNull().default("user"),
+    /**
+     * The identity to mint, for cookie_mint sites only. A site the person signs
+     * in to themselves has no minted identity — the target already knows who
+     * they are from the session its own login handed back.
+     */
+    targetUserId: text("target_user_id"),
+    targetEmail: text("target_email"),
+    targetName: text("target_name"),
+    targetRole: text("target_role").default("user"),
+    /** Whether a browser profile has been captured for this person and site. */
+    linkState: linkState("link_state").notNull().default("none"),
+    /**
+     * The cookies that sign-in produced, sealed.
+     *
+     * The profile directory holds everything else, but Chromium keeps session
+     * cookies — the ones with no expiry, which a great many logins issue — in
+     * memory and discards them on close. They would be lost between sessions
+     * without being captured here.
+     */
+    cookiesEncrypted: text("cookies_encrypted"),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    /** Last time a finished session wrote its cookies back to the profile. */
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("site_accounts_site_user_key").on(t.siteProfileId, t.userId)],
@@ -150,6 +184,7 @@ export const robotSessions = pgTable(
     siteProfileId: uuid("site_profile_id").references(() => siteProfiles.id, {
       onDelete: "set null",
     }),
+    kind: sessionKind("kind").notNull().default("agent"),
     status: sessionStatus("status").notNull().default("starting"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),

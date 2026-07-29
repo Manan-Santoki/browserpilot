@@ -1,3 +1,5 @@
+import type { RemoteInput } from "../browser/input";
+
 export type SessionStatus =
   | "starting"
   | "idle"
@@ -17,10 +19,26 @@ export type RobotEvent =
   | { type: "approval_request"; requestId: string; tool: string; summary: string }
   | { type: "approval_resolved"; requestId: string; approved: boolean }
   | { type: "file_ready"; fileId: string; filename: string; url: string }
+  /** A picture the agent took, to be shown in the conversation rather than linked. */
+  | { type: "screenshot"; filename: string; url: string }
+  /** Whether frames are flowing, so a reconnecting client's toggle tells the truth. */
+  | { type: "preview_state"; enabled: boolean }
   | { type: "error"; message: string };
+
+/**
+ * Where a client fetches a file this session produced.
+ *
+ * Runtime-relative on purpose: the console proxies the path under its own
+ * origin so the link carries the user's cookie instead of needing a ticket.
+ */
+export function sessionFileUrl(sessionId: string, filename: string): string {
+  return `/api/sessions/${sessionId}/files/${encodeURIComponent(filename)}`;
+}
 
 export type ClientCommand =
   | { type: "user_msg"; text: string }
   | { type: "approval"; requestId: string; approved: boolean }
   | { type: "preview"; enabled: boolean }
+  // Only a sign-in session accepts these: the person driving the browser.
+  | { type: "input"; event: RemoteInput }
   | { type: "stop" };

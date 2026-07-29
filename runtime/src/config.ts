@@ -15,6 +15,10 @@ export type RuntimeConfig = {
   masterKey: string;
   ticketSecret: string;
   downloadsRoot: string;
+  /** Saved browser profiles for sites people sign in to themselves. */
+  profilesRoot: string;
+  /** Disposable per-session copies of those profiles. */
+  scratchRoot: string;
   model: string;
   nodeBin: string;
   aiCredential: AiCredential;
@@ -56,6 +60,8 @@ export function loadConfig(env: Record<string, string | undefined>): RuntimeConf
     masterKey,
     ticketSecret: required(env, "BP_TICKET_SECRET"),
     downloadsRoot: env.BP_DOWNLOADS_DIR?.trim() || "./downloads",
+    profilesRoot: env.BP_PROFILES_DIR?.trim() || "./.data/profiles",
+    scratchRoot: env.BP_SCRATCH_DIR?.trim() || "./.data/scratch",
     model: env.BP_MODEL?.trim() || "claude-opus-5",
     nodeBin: env.BP_NODE_BIN?.trim() || "node",
     aiCredential: readCredential(env),

@@ -6,7 +6,11 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { restartRuntimeBrowser, startRuntimeSession, stopRuntimeSession } from "@/lib/runtime";
 
-export type StartState = { error?: string };
+export type StartState = {
+  error?: string;
+  /** Set when the fix is a sign-in, so the form can link straight to it. */
+  signInSiteId?: string;
+};
 
 export async function startSession(_prev: StartState, formData: FormData): Promise<StartState> {
   const user = await requireUser();
@@ -23,7 +27,15 @@ export async function startSession(_prev: StartState, formData: FormData): Promi
     title || undefined,
     model || undefined,
   );
-  if (!result.ok) return { error: result.error };
+  if (!result.ok) {
+    return {
+      error: result.error,
+      signInSiteId:
+        result.code === "not_linked" || result.code === "login_expired"
+          ? siteProfileId
+          : undefined,
+    };
+  }
 
   await audit({
     actorUserId: user.id,

@@ -6,7 +6,9 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { StatusLabel } from "@/components/status-lamp";
+import { SendIcon } from "lucide-react";
 import { AgentMarkdown } from "@/components/agent-markdown";
+import { BrowserStream, type BrowserStreamHandle } from "@/components/browser-stream";
 import { PushToTalk } from "./push-to-talk";
 
 import type { ChatItem } from "@/lib/transcript";
@@ -26,13 +28,13 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
   const [status, setStatus] = useState("connecting");
   const [ended, setEnded] = useState<{ reason: string | null } | null>(null);
   const [connected, setConnected] = useState(false);
-  const [previewOn, setPreviewOn] = useState(false);
-  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [previewOn, setPreviewOn] = useState(true);
+  const [chatOpen, setChatOpen] = useState(true);
   const [draft, setDraft] = useState("");
 
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
-  const frameUrlRef = useRef<string | null>(null);
+  const streamRef = useRef<BrowserStreamHandle | null>(null);
 
   const append = useCallback((item: ChatItem) => setItems((prev) => [...prev, item]), []);
 
@@ -77,27 +79,29 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
       const { url } = (await res.json()) as { url: string };
       if (closed) return;
 
-      socket = new WebSocket(url);
-      socket.binaryType = "blob";
-      wsRef.current = socket;
+      const opened = new WebSocket(url);
+      socket = opened;
+      opened.binaryType = "blob";
+      wsRef.current = opened;
 
-      socket.onopen = () => setConnected(true);
-      socket.onclose = () => {
+      opened.onopen = () => {
+        setConnected(true);
+        // A panel you have to switch on is a panel that looks dead. Ask for
+        // frames straight away; the switch is there to stop them, not start them.
+        opened.send(JSON.stringify({ type: "preview", enabled: true }));
+      };
+      opened.onclose = () => {
         setConnected(false);
         if (closed) return; // we navigated away; nothing to explain
         void explainClosure().then((explained) => {
           if (!explained) setStatus((s) => (s === "stopped" ? s : "disconnected"));
         });
       };
-      socket.onerror = () => setConnected(false);
+      opened.onerror = () => setConnected(false);
 
-      socket.onmessage = (event) => {
+      opened.onmessage = (event) => {
         if (event.data instanceof Blob) {
-          // Release the previous frame or the tab leaks memory over a long run.
-          if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
-          const next = URL.createObjectURL(event.data);
-          frameUrlRef.current = next;
-          setFrameUrl(next);
+          streamRef.current?.push(event.data);
           return;
         }
 
@@ -123,6 +127,12 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             // carries the user's cookie instead of needing a ticket.
             append({ kind: "file", filename: msg.filename, url: msg.url });
             break;
+          case "screenshot":
+            append({ kind: "screenshot", filename: msg.filename, url: msg.url });
+            break;
+          case "preview_state":
+            setPreviewOn(msg.enabled);
+            break;
           case "approval_request":
             append({ kind: "approval", requestId: msg.requestId, summary: msg.summary });
             break;
@@ -144,7 +154,6 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
     return () => {
       closed = true;
       socket?.close();
-      if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
     };
   }, [sessionId, runtimeHttpUrl, append, reconnectNonce]);
 
@@ -189,9 +198,53 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
     );
   }
 
+  // The browser is what this page is for, so it takes the room and the chat
+  // gets a column beside it. Below lg they stack, browser first — on a phone
+  // you scroll to the conversation, you do not hunt for the screen.
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <Card className="flex h-[72vh] flex-col gap-0 overflow-hidden py-0">
+    <div
+      className={`grid min-h-0 flex-1 items-stretch gap-4 lg:min-h-[480px] ${
+        chatOpen ? "lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem]" : ""
+      }`}
+    >
+      <Card className="order-1 flex min-h-0 flex-col gap-0 overflow-hidden py-0 max-lg:h-auto">
+        <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+          <span className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+            Browser
+          </span>
+          <div className="flex items-center gap-4">
+            <label className="text-muted-foreground flex items-center gap-2 text-xs">
+              <Switch checked={previewOn} onCheckedChange={togglePreview} disabled={!connected} />
+              Live preview
+            </label>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="max-lg:hidden"
+              onClick={() => setChatOpen((open) => !open)}
+              title={chatOpen ? "Give the browser the whole width" : "Show the conversation"}
+            >
+              {chatOpen ? "Widen" : "Show chat"}
+            </Button>
+          </div>
+        </header>
+
+        {/* Fills the panel; the canvas scales the frame into it and keeps its
+            shape, so nothing overflows and nothing is cropped. */}
+        <BrowserStream
+          ref={streamRef}
+          className="bg-background min-h-0 w-full flex-1 max-lg:aspect-[16/10]"
+          placeholder={
+            previewOn ? "Waiting for the first frame…" : "Turn on live preview to watch the browser."
+          }
+        />
+      </Card>
+
+      <Card
+        className={`order-2 flex min-h-0 flex-col gap-0 overflow-hidden py-0 max-lg:h-[70vh] ${
+          chatOpen ? "" : "lg:hidden"
+        }`}
+      >
         <header className="flex items-center gap-2 border-b px-4 py-2.5">
           <StatusLabel status={connected ? status : "disconnected"} />
           {!connected ? (
@@ -209,7 +262,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
           ) : null}
         </header>
 
-        <div ref={logRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm">
+        <div ref={logRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm">
           {items.length === 0 ? (
             <p className="text-muted-foreground">
               Tell the robot what to do. It asks when something is ambiguous, and waits for you
@@ -245,6 +298,20 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
                 <p key={i} className="text-destructive">
                   {item.text}
                 </p>
+              );
+            }
+            if (item.kind === "screenshot") {
+              // Asking for a screenshot and getting a download link back is not
+              // an answer, so it is shown — full size is one click away.
+              return (
+                <a key={i} href={item.url} target="_blank" rel="noreferrer" className="block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.url}
+                    alt={`Screenshot of the page — ${item.filename}`}
+                    className="max-h-72 w-auto rounded-lg border transition-opacity hover:opacity-90"
+                  />
+                </a>
               );
             }
             if (item.kind === "file") {
@@ -290,7 +357,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
           })}
         </div>
 
-        <form onSubmit={send} className="flex items-center gap-2 border-t p-3">
+        <form onSubmit={send} className="flex shrink-0 items-center gap-2 border-t p-2.5">
           <PushToTalk
             language={language}
             disabled={!connected}
@@ -309,35 +376,16 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             }
             className="flex-1"
           />
-          <Button type="submit" disabled={!connected || !draft.trim()}>
-            Send
+          <Button
+            type="submit"
+            size="icon"
+            aria-label="Send"
+            title="Send"
+            disabled={!connected || !draft.trim()}
+          >
+            <SendIcon />
           </Button>
         </form>
-      </Card>
-
-      <Card className="flex h-[72vh] flex-col gap-0 overflow-hidden py-0">
-        <header className="flex items-center justify-between border-b px-4 py-2.5">
-          <span className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
-            Browser
-          </span>
-          <label className="text-muted-foreground flex items-center gap-2 text-xs">
-            <Switch checked={previewOn} onCheckedChange={togglePreview} disabled={!connected} />
-            Live preview
-          </label>
-        </header>
-
-        <div className="bg-background flex flex-1 items-center justify-center overflow-hidden">
-          {frameUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={frameUrl} alt="Live browser" className="max-h-full max-w-full object-contain" />
-          ) : (
-            <p className="text-muted-foreground px-6 text-center text-sm">
-              {previewOn
-                ? "Waiting for the first frame…"
-                : "Turn on live preview to watch the browser."}
-            </p>
-          )}
-        </div>
       </Card>
     </div>
   );

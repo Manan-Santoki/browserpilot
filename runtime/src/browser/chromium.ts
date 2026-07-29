@@ -4,14 +4,42 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mintRobotCookie, type TargetUser } from "../auth/mint";
 
+/** A cookie captured from a sign-in and kept until the next session. */
+export type SavedCookie = {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  /** Seconds since the epoch; -1 marks a session cookie. */
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Lax" | "None" | "Strict";
+};
+
 export type LaunchOptions = {
   targetUrl: string;
-  user: TargetUser;
-  sessionSecret: string;
+  /** Present for cookie_mint sites; a saved profile carries its own identity. */
+  user?: TargetUser;
+  sessionSecret?: string;
   /** Cookie name the target reads — a property of the site, not of us. */
-  cookieName: string;
+  cookieName?: string;
   downloadsDir: string;
   cookieTtlSeconds?: number;
+  /**
+   * Launch from this directory instead of a throwaway one. Used both by a login
+   * session, which writes the person's sign-in into it, and by an agent session
+   * running from a disposable copy of that profile.
+   */
+  profileDir?: string;
+  /** Skip the opening navigation — a login session drives itself there. */
+  skipNavigation?: boolean;
+  /**
+   * Cookies captured from an earlier sign-in, applied before the first
+   * navigation. The profile carries local storage and the rest; these are here
+   * because Chromium never writes session cookies to disk.
+   */
+  cookies?: SavedCookie[];
 };
 
 export type DownloadHandler = (download: {
@@ -22,6 +50,8 @@ export type DownloadHandler = (download: {
 export type RobotBrowser = {
   cdpEndpoint: string;
   downloadsDir: string;
+  /** Where this browser's profile lives, so a session can write it back. */
+  profileDir: string;
   page: Page;
   context: BrowserContext;
   onDownload(handler: DownloadHandler): void;
@@ -52,36 +82,49 @@ async function waitForCdp(endpoint: string, timeoutMs = 15_000): Promise<void> {
 
 export async function launchRobotBrowser(opts: LaunchOptions): Promise<RobotBrowser> {
   const port = await freePort();
-  const profileDir = await mkdtemp(join(tmpdir(), "bp-profile-"));
+  const profileDir = opts.profileDir ?? (await mkdtemp(join(tmpdir(), "bp-profile-")));
 
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: true,
     acceptDownloads: true,
     downloadsPath: opts.downloadsDir,
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: 1600, height: 1000 },
     args: [`--remote-debugging-port=${port}`, "--remote-allow-origins=*"],
   });
 
   const cdpEndpoint = `http://127.0.0.1:${port}`;
   await waitForCdp(cdpEndpoint);
 
-  const token = await mintRobotCookie(opts.user, opts.sessionSecret, opts.cookieTtlSeconds);
-  await context.addCookies([
-    {
-      name: opts.cookieName,
-      value: token,
-      url: opts.targetUrl,
-      httpOnly: true,
-      sameSite: "Lax",
-    },
-  ]);
+  // A site we hold the signing secret for gets a freshly minted session. A site
+  // the person signed in to themselves already carries one in its profile.
+  if (opts.user && opts.sessionSecret) {
+    const token = await mintRobotCookie(opts.user, opts.sessionSecret, opts.cookieTtlSeconds);
+    await context.addCookies([
+      {
+        name: opts.cookieName ?? "session",
+        value: token,
+        url: opts.targetUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      },
+    ]);
+  }
+
+  if (opts.cookies?.length) {
+    // Before navigating: a request that goes out without them lands on the
+    // target's sign-in page and is what we are trying to avoid.
+    await context.addCookies(opts.cookies).catch(() => {});
+  }
 
   const page = context.pages()[0] ?? (await context.newPage());
-  await page.goto(opts.targetUrl, { waitUntil: "domcontentloaded" });
+  if (!opts.skipNavigation) {
+    await page.goto(opts.targetUrl, { waitUntil: "domcontentloaded" });
+  }
 
   return {
     cdpEndpoint,
     downloadsDir: opts.downloadsDir,
+    profileDir,
     page,
     context,
     onDownload(handler: DownloadHandler) {

@@ -13,3 +13,9 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .playwright-mcp/
+
+# Runtime browser state: saved sign-in profiles and their per-session copies.
+# These contain live session cookies — treat them as credentials, not files.
+profiles/
+scratch/
+.data/

@@ -75,6 +75,15 @@ export function StartSessionForm({ sites }: { sites: Array<{ id: string; name: s
       {state.error ? (
         <p role="alert" className="text-destructive w-full text-sm">
           {state.error}
+          {state.signInSiteId ? (
+            <>
+              {" "}
+              <Link href="/sites" className="underline underline-offset-4">
+                Go to Sites to sign in
+              </Link>
+              .
+            </>
+          ) : null}
         </p>
       ) : null}
     </form>

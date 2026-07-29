@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import {
@@ -8,7 +9,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { classifyToolUse } from "./policy";
 import { buildSystemPrompt } from "./prompt";
-import type { RobotEvent } from "../session/events";
+import { sessionFileUrl, type RobotEvent } from "../session/events";
 import type { TargetSite } from "../store";
 
 export type QueryFn = (params: { prompt: AsyncIterable<never>; options?: Options }) => Query;
@@ -33,6 +34,10 @@ export type StartAgentOptions = {
   env: Record<string, string>;
   /** Node binary used to run the MCP server. Override when it isn't on PATH. */
   nodeBin?: string;
+  /** Named in the URLs the agent's screenshots are served from. */
+  sessionId: string;
+  /** Where those screenshots are written, alongside the session's downloads. */
+  filesDir: string;
   onEvent: (event: RobotEvent) => void;
 };
 
@@ -104,6 +109,42 @@ function shortToolName(name: string): string {
 }
 
 /**
+ * Adjust what a tool was asked to do before it does it.
+ *
+ * Playwright MCP hands a screenshot back as an image only when no filename was
+ * given; with one it writes the file into its own output directory and returns
+ * a path instead. That directory belongs to the MCP process — nobody on our
+ * side can reach it — and the picture reaches neither the person who asked for
+ * it nor the model that took it, which then describes the page from memory.
+ * Dropping the filename is what makes a screenshot an actual screenshot.
+ */
+function normalizeToolInput(
+  toolName: string,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  if (shortToolName(toolName) !== "browser_take_screenshot" || !("filename" in input)) {
+    return input;
+  }
+  const { filename: _dropped, ...rest } = input;
+  return rest;
+}
+
+/** Extensions for the image types the browser tools can return. */
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
+
+type ContentBlock = { type?: string; content?: unknown; source?: unknown };
+
+/** Content blocks of a message, whether it carries prose or structured parts. */
+function blocksOf(message: unknown): ContentBlock[] {
+  const content = (message as { content?: unknown } | undefined)?.content;
+  return Array.isArray(content) ? (content as ContentBlock[]) : [];
+}
+
+/**
  * A one-line description of what a tool call will actually do.
  *
  * This is the entire basis on which someone approves or denies, so it has to
@@ -152,8 +193,11 @@ export async function startAgent(
     toolName: string,
     toolInput: Record<string, unknown>,
   ): Promise<PermissionResult> => {
+    const updatedInput = normalizeToolInput(toolName, toolInput);
+
+    // Classified on what the model actually asked for, not on our rewrite.
     if (classifyToolUse(toolName, toolInput, opts.site.destructivePatterns) === "auto") {
-      return { behavior: "allow", updatedInput: toolInput };
+      return { behavior: "allow", updatedInput };
     }
 
     const requestId = `apr_${++nextRequestId}`;
@@ -171,7 +215,7 @@ export async function startAgent(
     opts.onEvent({ type: "approval_resolved", requestId, approved });
 
     return approved
-      ? { behavior: "allow", updatedInput: toolInput }
+      ? { behavior: "allow", updatedInput }
       : { behavior: "deny", message: "The user declined this action." };
   };
 
@@ -201,25 +245,71 @@ export async function startAgent(
 
   const session = queryFn({ prompt: input.stream() as AsyncIterable<never>, options });
 
+  let screenshots = 0;
+
+  /**
+   * Put a picture a tool returned somewhere the console can fetch it.
+   *
+   * The bytes go to disk rather than down the socket: a screenshot is a few
+   * hundred kilobytes, and base64 in the event stream would sit in the durable
+   * transcript for the life of the session and be replayed on every reload.
+   */
+  async function saveImage(block: ContentBlock): Promise<void> {
+    const source = block.source as
+      | { type?: string; media_type?: string; data?: string }
+      | undefined;
+    if (source?.type !== "base64" || !source.data) return;
+
+    const filename = `screenshot-${++screenshots}.${IMAGE_EXTENSIONS[source.media_type ?? ""] ?? "png"}`;
+    try {
+      await writeFile(join(opts.filesDir, filename), Buffer.from(source.data, "base64"));
+    } catch (error) {
+      opts.onEvent({
+        type: "error",
+        message: `Could not save a screenshot: ${(error as Error).message}`,
+      });
+      return;
+    }
+
+    opts.onEvent({
+      type: "screenshot",
+      filename,
+      url: sessionFileUrl(opts.sessionId, filename),
+    });
+  }
+
   // Pump SDK messages into RobotEvents. Runs until the query closes.
   void (async () => {
     try {
       for await (const message of session as AsyncIterable<unknown>) {
-        const msg = message as {
-          type: string;
-          message?: { content?: Array<Record<string, unknown>> };
-        };
-        if (msg.type !== "assistant") continue;
-        for (const block of msg.message?.content ?? []) {
-          if (block.type === "text" && typeof block.text === "string") {
-            opts.onEvent({ type: "agent_text", text: block.text });
-          } else if (block.type === "tool_use" && typeof block.name === "string") {
-            const toolInput = (block.input ?? {}) as Record<string, unknown>;
-            opts.onEvent({
-              type: "tool_activity",
-              tool: shortToolName(block.name),
-              summary: summarize(block.name, toolInput),
-            });
+        const msg = message as { type: string; message?: unknown };
+
+        if (msg.type === "assistant") {
+          for (const raw of blocksOf(msg.message)) {
+            const block = raw as Record<string, unknown>;
+            if (block.type === "text" && typeof block.text === "string") {
+              opts.onEvent({ type: "agent_text", text: block.text });
+            } else if (block.type === "tool_use" && typeof block.name === "string") {
+              const toolInput = (block.input ?? {}) as Record<string, unknown>;
+              opts.onEvent({
+                type: "tool_activity",
+                tool: shortToolName(block.name),
+                summary: summarize(block.name, toolInput),
+              });
+            }
+          }
+          continue;
+        }
+
+        // Tool results come back as user messages. This is the only place a
+        // picture the agent took ever appears, so a pump that read assistant
+        // turns alone dropped every screenshot on the floor.
+        if (msg.type === "user") {
+          for (const block of blocksOf(msg.message)) {
+            if (block.type !== "tool_result" || !Array.isArray(block.content)) continue;
+            for (const part of block.content as ContentBlock[]) {
+              if (part?.type === "image") await saveImage(part);
+            }
           }
         }
       }

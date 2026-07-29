@@ -6,6 +6,7 @@ import { SessionManager, SessionError, type ManagerDeps } from "../src/session/m
 import { Store } from "../src/store";
 import type { RobotEvent } from "../src/session/events";
 import { withTestSettings } from "./support/settings";
+import { DB_HEAVY_TIMEOUT_MS } from "./helpers";
 
 const url =
   process.env.DATABASE_URL ?? "postgresql://browserpilot:devpassword@127.0.0.1:55432/browserpilot";
@@ -71,19 +72,51 @@ afterAll(async () => {
 function makeDeps(overrides: Partial<ManagerDeps> = {}) {
   const launched: Array<{ targetUrl: string; user: Record<string, string> }> = [];
   const sent: string[] = [];
-  const closed = { browser: 0, agent: 0 };
+  const closed = { browser: 0, agent: 0, input: 0 };
+  const linked = new Set<string>();
+  const checkouts: string[] = [];
+  const syncedBack: string[] = [];
+  const dispatched: unknown[] = [];
+  let landingUrl = "https://target.test/dashboard";
   let emit: ((e: RobotEvent) => void) | undefined;
   let clock = 1_000;
 
   const deps: ManagerDeps = {
     store,
+    profiles: {
+      path: (site, user) => `/tmp/bp-profiles/${site}/${user}`,
+      exists: async (site, user) => linked.has(`${site}:${user}`),
+      prepareForLogin: async (site, user) => {
+        linked.add(`${site}:${user}`);
+        return `/tmp/bp-profiles/${site}/${user}`;
+      },
+      checkout: async (site, user) => {
+        if (!linked.has(`${site}:${user}`)) throw new Error("No saved login for this site");
+        checkouts.push(`${site}:${user}`);
+      },
+      syncBack: async (site, user) => {
+        syncedBack.push(`${site}:${user}`);
+      },
+      remove: async (site, user) => {
+        linked.delete(`${site}:${user}`);
+      },
+    },
+    createInput: async () => ({
+      dispatch: async (event) => {
+        dispatched.push(event);
+      },
+      close: () => {
+        closed.input++;
+      },
+    }),
     now: () => clock,
     launchBrowser: async (args) => {
       launched.push({ targetUrl: args.targetUrl, user: args.user as unknown as Record<string, string> });
       return {
         cdpEndpoint: "http://127.0.0.1:1",
         downloadsDir: args.downloadsDir,
-        page: {} as never,
+        profileDir: args.profileDir ?? "/tmp/bp-fake-profile",
+        page: { url: () => landingUrl } as never,
         context: {} as never,
         onDownload: () => {},
         close: async () => {
@@ -110,12 +143,21 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
     launched,
     sent,
     closed,
+    linked,
+    checkouts,
+    syncedBack,
+    dispatched,
+    landOn: (url: string) => (landingUrl = url),
     fire: (e: RobotEvent) => emit!(e),
     tick: (ms: number) => (clock += ms),
   };
 }
 
-const config = { downloadsRoot: "/tmp/bp-mgr-test", env: {} };
+const config = {
+  downloadsRoot: "/tmp/bp-mgr-test",
+  scratchRoot: "/tmp/bp-mgr-test-scratch",
+  env: {},
+};
 
 async function cleanupSessions() {
   await db.delete(robotSessions).where(eq(robotSessions.userId, userId));
@@ -184,10 +226,6 @@ describe("starting a session", () => {
     await cleanupSessions();
   });
 });
-
-// Each create/stop is several round-trips to Postgres, which is remote here.
-// These two walk the cap up and back down, so they need more than the 5s default.
-const DB_HEAVY_TIMEOUT_MS = 30_000;
 
 describe("concurrency limits", () => {
   test("the per-user limit is enforced", async () => {

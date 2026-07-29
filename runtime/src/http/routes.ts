@@ -32,6 +32,8 @@ const STATUS_FOR: Record<SessionError["code"], number> = {
   site_limit: 429,
   user_limit: 429,
   global_limit: 429,
+  not_linked: 409,
+  login_expired: 409,
 };
 
 export function createServer(manager: SessionManager, opts: ServerOptions) {
@@ -118,10 +120,56 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         });
       }
 
+      // Open a browser for the person to sign in to a site themselves.
+      if (path === "/api/logins" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { siteProfileId?: string };
+        if (!body.siteProfileId) return json({ error: "siteProfileId is required" }, 400);
+
+        try {
+          const id = await manager.createLogin(claims.userId, body.siteProfileId);
+          return json({ id });
+        } catch (error) {
+          if (error instanceof SessionError) {
+            return json({ error: error.message, code: error.code }, STATUS_FOR[error.code]);
+          }
+          return json({ error: (error as Error).message }, 500);
+        }
+      }
+
+      const saveLoginMatch = /^\/api\/logins\/([^/]+)\/save$/.exec(path);
+      if (saveLoginMatch && req.method === "POST") {
+        const session = manager.get(saveLoginMatch[1]!);
+        if (!session) return json({ error: "No such session" }, 404);
+        // A saved login is that person's own; an admin has no business
+        // adopting it, so this is an ownership check rather than canAccess.
+        if (session.userId !== claims.userId) return json({ error: "Not your sign-in" }, 403);
+
+        try {
+          await manager.saveLogin(session.id);
+          return json({ ok: true });
+        } catch (error) {
+          return json({ error: (error as Error).message }, 400);
+        }
+      }
+
       const stopMatch = /^\/api\/sessions\/([^/]+)\/stop$/.exec(path);
       if (stopMatch && req.method === "POST") {
-        const session = manager.get(stopMatch[1]!);
-        if (!session) return json({ error: "No such session" }, 404);
+        const id = stopMatch[1]!;
+        const session = manager.get(id);
+
+        // A session this runtime never knew about, or lost to a restart, still
+        // has a row that reads as running and still counts against a person's
+        // limit. Stop has to work on it, or nothing ever will.
+        if (!session) {
+          const owner = await opts.store.sessionOwner(id);
+          if (!owner) return json({ error: "No such session" }, 404);
+          if (claims.role !== "ADMIN" && owner !== claims.userId) {
+            return json({ error: "Not your session" }, 403);
+          }
+          const cleared = await opts.store.forceStop(id, "browser was already gone");
+          return json({ ok: true, cleared });
+        }
+
         if (!manager.canAccess(session, claims.userId, claims.role)) {
           return json({ error: "Not your session" }, 403);
         }
@@ -185,6 +233,15 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         }
 
         ws.send(JSON.stringify({ type: "session_status", status: session.status } as RobotEvent));
+        // Whether frames are already flowing, so a client that reconnects to a
+        // running session shows the true state of the preview rather than its
+        // own freshly-mounted default.
+        ws.send(
+          JSON.stringify({
+            type: "preview_state",
+            enabled: session.previewEnabled,
+          } as RobotEvent),
+        );
 
         ws.data.unsubscribe = manager.subscribe(ws.data.sessionId, (event) => {
           ws.send(JSON.stringify(event));
@@ -218,6 +275,13 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             break;
           case "preview":
             void manager.setPreview(id, command.enabled);
+            break;
+          case "input":
+            // Ownership, not canAccess: an admin watching a colleague's
+            // sign-in must not be able to type into it.
+            if (session.userId === ws.data.claims.userId) {
+              void manager.dispatchInput(id, command.event);
+            }
             break;
           case "stop":
             void manager.stop(id);

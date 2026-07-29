@@ -9,6 +9,8 @@ export type ChatItem =
   | { kind: "tool"; text: string }
   | { kind: "error"; text: string }
   | { kind: "file"; filename: string; url: string }
+  /** A picture the agent took, shown in the conversation rather than linked. */
+  | { kind: "screenshot"; filename: string; url: string }
   | { kind: "approval"; requestId: string; summary: string; resolved?: "approved" | "denied" };
 
 type StoredEvent = {
@@ -57,6 +59,11 @@ export async function loadTranscript(sessionId: string): Promise<ChatItem[]> {
       case "file_ready":
         if (event.filename && event.url) {
           items.push({ kind: "file", filename: event.filename, url: event.url });
+        }
+        break;
+      case "screenshot":
+        if (event.filename && event.url) {
+          items.push({ kind: "screenshot", filename: event.filename, url: event.url });
         }
         break;
       case "approval_request":
