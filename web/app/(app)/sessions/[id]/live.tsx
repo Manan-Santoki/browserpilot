@@ -17,6 +17,7 @@ type Props = { sessionId: string; runtimeHttpUrl: string; language: string };
 export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState("connecting");
+  const [ended, setEnded] = useState<{ reason: string | null } | null>(null);
   const [connected, setConnected] = useState(false);
   const [previewOn, setPreviewOn] = useState(false);
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
@@ -32,11 +33,35 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
     let closed = false;
     let socket: WebSocket | undefined;
 
+    /**
+     * A closed socket usually means the session ended — stopped, timed out, or
+     * failed — so ask the console why before reporting anything to the user.
+     * Showing "disconnected" for a session that was deliberately stopped reads
+     * as a bug in the app rather than the outcome the user asked for.
+     */
+    async function explainClosure() {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/status`);
+        if (!res.ok) return false;
+        const body = (await res.json()) as { status: string; endedReason: string | null };
+        if (["stopped", "failed", "interrupted"].includes(body.status)) {
+          setEnded({ reason: body.endedReason });
+          setStatus(body.status);
+          return true;
+        }
+      } catch {
+        // Leave the generic disconnected state.
+      }
+      return false;
+    }
+
     async function connect() {
       const res = await fetch(`/api/sessions/${sessionId}/ticket`, { method: "POST" });
       if (!res.ok) {
-        setStatus("cannot connect");
-        append({ kind: "error", text: "Could not get permission to connect to this session." });
+        if (!(await explainClosure())) {
+          setStatus("cannot connect");
+          append({ kind: "error", text: "Could not get permission to connect to this session." });
+        }
         return;
       }
 
@@ -50,8 +75,12 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
       socket.onopen = () => setConnected(true);
       socket.onclose = () => {
         setConnected(false);
-        setStatus((s) => (s === "stopped" ? s : "disconnected"));
+        if (closed) return; // we navigated away; nothing to explain
+        void explainClosure().then((explained) => {
+          if (!explained) setStatus((s) => (s === "stopped" ? s : "disconnected"));
+        });
       };
+      socket.onerror = () => setConnected(false);
 
       socket.onmessage = (event) => {
         if (event.data instanceof Blob) {
@@ -73,6 +102,9 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
             break;
           case "session_status":
             setStatus(msg.status);
+            if (["stopped", "failed", "interrupted"].includes(msg.status)) {
+              setEnded({ reason: null });
+            }
             break;
           case "error":
             append({ kind: "error", text: msg.message });
@@ -129,6 +161,25 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
   };
 
   const busy = status === "working" || status === "starting";
+
+  if (ended) {
+    return (
+      <div className="rounded-lg border border-neutral-200 px-6 py-12 text-center dark:border-neutral-800">
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          This session has ended{ended.reason ? `: ${ended.reason}` : "."}
+        </p>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          Its browser is gone, so there is nothing left to watch or talk to.
+        </p>
+        <a
+          href="/"
+          className="mt-4 inline-block rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
+        >
+          Back to sessions
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
