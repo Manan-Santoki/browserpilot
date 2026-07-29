@@ -110,6 +110,8 @@ export type FakeBrowserState = {
   screencastStarts: number;
   screencastStops: number;
   emit?: (event: RobotEvent) => void;
+  /** The runner's route for keeping a file, as the manager wired it. */
+  saveFile?: (filename: string, bytes: Uint8Array) => Promise<void>;
   sent: string[];
   closed: { browser: number; agent: number; input: number };
   /** What the target answered the opening navigation with. */
@@ -196,6 +198,7 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
     },
     startAgent: async (args) => {
       state.emit = args.onEvent;
+      state.saveFile = args.saveFile;
       return {
         send: (t: string) => state.sent.push(t),
         approve: () => {},

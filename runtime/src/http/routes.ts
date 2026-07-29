@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { verifyTicket, type TicketClaims } from "@browserpilot/core";
@@ -6,6 +8,7 @@ import { SessionError, type SessionManager } from "../session/manager";
 import type { Store } from "../store";
 import { contentTypeFor } from "@browserpilot/core";
 import { objectKey, type ObjectStore } from "../storage/object-store";
+import { describeStorage, type StorageEnv } from "../storage/settings";
 
 type SocketData = {
   sessionId: string;
@@ -20,6 +23,8 @@ export type ServerOptions = {
   store: Store;
   /** Where session downloads are kept. */
   objects: () => Promise<ObjectStore>;
+  /** The storage variables this deployment was started with. */
+  storageEnv: StorageEnv;
   /** Where per-session download directories live. */
   downloadsRoot: string;
 };
@@ -108,6 +113,34 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           }
           return json({ error: (error as Error).message }, 500);
         }
+      }
+
+      // Read-only, admin-only: what the runtime resolved storage to, so the
+      // console can state it rather than restate the configuration it sent.
+      if (path === "/api/storage" && req.method === "GET") {
+        if (claims.role !== "ADMIN") return json({ error: "Administrators only" }, 403);
+
+        const settings = await opts.store.storageSettings(opts.storageEnv);
+        const store = await opts.objects();
+
+        // Prove it end to end rather than describe intent: write a small object,
+        // read it back, remove it. A misconfigured bucket fails here, not on
+        // someone's download.
+        let reachable = false;
+        let error: string | undefined;
+        const probeKey = "sessions/_healthcheck/probe.txt";
+        try {
+          const staged = join(tmpdir(), `bp-storage-probe-${Date.now()}`);
+          await Bun.write(staged, "ok");
+          await store.put(probeKey, staged, "text/plain");
+          reachable = (await store.head(probeKey)) !== undefined;
+          await store.delete(probeKey).catch(() => {});
+          await rm(staged, { force: true }).catch(() => {});
+        } catch (e) {
+          error = (e as Error).message;
+        }
+
+        return json({ ...describeStorage(settings), reachable, error });
       }
 
       if (path === "/api/sessions" && req.method === "GET") {

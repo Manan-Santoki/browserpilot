@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import {
@@ -36,8 +35,14 @@ export type StartAgentOptions = {
   nodeBin?: string;
   /** Named in the URLs the agent's screenshots are served from. */
   sessionId: string;
-  /** Where those screenshots are written, alongside the session's downloads. */
-  filesDir: string;
+  /**
+   * Keep a file the agent produced and make it fetchable.
+   *
+   * The runner does not know whether that means a bucket or a disk, which is
+   * the point: it once wrote screenshots straight to a directory, and they
+   * stopped being reachable the moment downloads moved to object storage.
+   */
+  saveFile: (filename: string, bytes: Uint8Array) => Promise<void>;
   onEvent: (event: RobotEvent) => void;
 };
 
@@ -262,7 +267,7 @@ export async function startAgent(
 
     const filename = `screenshot-${++screenshots}.${IMAGE_EXTENSIONS[source.media_type ?? ""] ?? "png"}`;
     try {
-      await writeFile(join(opts.filesDir, filename), Buffer.from(source.data, "base64"));
+      await opts.saveFile(filename, Buffer.from(source.data, "base64"));
     } catch (error) {
       opts.onEvent({
         type: "error",

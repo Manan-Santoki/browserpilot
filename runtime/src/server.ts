@@ -73,6 +73,7 @@ const { server } = createServer(manager, {
   ticketSecret: config.ticketSecret,
   store,
   objects,
+  storageEnv: storageEnv(process.env),
   downloadsRoot: config.downloadsRoot,
 });
 

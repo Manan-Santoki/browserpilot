@@ -37,7 +37,7 @@ const OPTS = {
   env: { CLAUDE_CODE_OAUTH_TOKEN: "t" },
   sessionId: "sess-1",
   // Overridden by the tests that actually write a screenshot.
-  filesDir: "/tmp/bp-runner-files",
+  saveFile: async () => {},
 };
 
 /** Captures what the runner passed to the SDK and lets the test drive messages back. */
@@ -309,12 +309,19 @@ describe("screenshots", () => {
   const PIXEL =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-  test("a screenshot tool result is saved and announced with a URL", async () => {
-    const filesDir = await mkdtemp(join(tmpdir(), "bp-shots-"));
+  test("a screenshot tool result is kept and announced with a URL", async () => {
+    const kept: Array<{ filename: string; bytes: Uint8Array }> = [];
     const fake = fakeQuery();
     const events: RobotEvent[] = [];
     const runner = await startAgent(
-      { ...OPTS, filesDir, sessionId: "sess-42", onEvent: (e) => events.push(e) },
+      {
+        ...OPTS,
+        sessionId: "sess-42",
+        saveFile: async (filename, bytes) => {
+          kept.push({ filename, bytes });
+        },
+        onEvent: (e) => events.push(e),
+      },
       { queryFn: fake.queryFn },
     );
 
@@ -326,20 +333,21 @@ describe("screenshots", () => {
     expect(shot.filename).toBe("screenshot-1.png");
     expect(shot.url).toBe("/api/sessions/sess-42/files/screenshot-1.png");
 
-    // The bytes have to actually be there — the URL is a promise to serve them.
-    const written = await readFile(join(filesDir, shot.filename));
-    expect(written).toEqual(Buffer.from(PIXEL, "base64"));
+    // The URL is a promise to serve these bytes, so they must have been handed
+    // over — writing them to a directory of its own is what broke them once
+    // downloads moved into object storage.
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.filename).toBe("screenshot-1.png");
+    expect(Buffer.from(kept[0]!.bytes)).toEqual(Buffer.from(PIXEL, "base64"));
 
     await runner.stop();
-    await rm(filesDir, { recursive: true, force: true });
   });
 
   test("each screenshot gets its own name, and the type decides the extension", async () => {
-    const filesDir = await mkdtemp(join(tmpdir(), "bp-shots-"));
     const fake = fakeQuery();
     const events: RobotEvent[] = [];
     const runner = await startAgent(
-      { ...OPTS, filesDir, onEvent: (e) => events.push(e) },
+      { ...OPTS, onEvent: (e) => events.push(e) },
       { queryFn: fake.queryFn },
     );
 
@@ -351,7 +359,6 @@ describe("screenshots", () => {
     expect(names).toEqual(["screenshot-1.png", "screenshot-2.jpg"]);
 
     await runner.stop();
-    await rm(filesDir, { recursive: true, force: true });
   });
 
   test("a tool result with no image produces no screenshot", async () => {

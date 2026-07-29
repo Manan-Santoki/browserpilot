@@ -38,6 +38,7 @@ function start() {
     ticketSecret: TICKET_SECRET,
     store,
     objects: async () => createLocalStore(managerConfig.downloadsRoot),
+    storageEnv: {},
     downloadsRoot: managerConfig.downloadsRoot,
   });
   running = handle;

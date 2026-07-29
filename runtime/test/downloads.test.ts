@@ -93,6 +93,27 @@ describe("downloads", () => {
     await manager.stop(id);
   });
 
+  test("a screenshot the agent took is fetchable, not just written somewhere", async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    // What the agent runner does with an image a tool handed back. It used to
+    // write these to a directory of its own, which stopped being where the
+    // console reads from the moment downloads moved into object storage — so
+    // every screenshot 404'd while still being announced as ready.
+    await state.saveFile!("screenshot-1.png", new Uint8Array([1, 2, 3, 4]));
+
+    const store = await deps.objects();
+    const stored = await store.get(`sessions/${id}/screenshot-1.png`);
+    expect(stored).toBeDefined();
+    expect(new Uint8Array(await new Response(stored!).arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3, 4]),
+    );
+
+    await manager.stop(id);
+  });
+
   test("a failed save surfaces as an error rather than silence", async () => {
     const { deps, state } = fakeDeps();
     const manager = new SessionManager(managerConfig, deps);

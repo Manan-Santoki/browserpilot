@@ -1,10 +1,13 @@
 import { settings } from "@browserpilot/db";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { runtimeStorageStatus } from "@/lib/runtime";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StorageForm } from "./form";
 
 export default async function StoragePage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
+  const status = await runtimeStorageStatus(admin);
 
   const rows = await db().select().from(settings);
   const stored = Object.fromEntries(rows.map((r) => [r.key, r.value]));
@@ -29,6 +32,43 @@ export default async function StoragePage() {
           point it at your own if you would rather the files lived somewhere you control.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Right now</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm">
+          {!status.ok ? (
+            <p className="text-destructive">
+              The browser service did not answer, so this cannot be confirmed: {status.error}
+            </p>
+          ) : status.data.driver === "local" ? (
+            <p className="text-muted-foreground">
+              Files are being kept on the server&apos;s own disk. They are lost when it is
+              redeployed.
+            </p>
+          ) : status.data.reachable ? (
+            <p>
+              <span className="lamp lamp-idle" aria-hidden /> Files are going to{" "}
+              <span className="font-mono text-xs">{status.data.bucket}</span>
+              {status.data.endpoint ? (
+                <>
+                  {" at "}
+                  <span className="font-mono text-xs">{status.data.endpoint}</span>
+                </>
+              ) : null}
+              . Checked by writing an object and reading it back.
+            </p>
+          ) : (
+            <p className="text-destructive">
+              <span className="lamp lamp-waiting" aria-hidden /> The bucket{" "}
+              <span className="font-mono text-xs">{status.data.bucket}</span> is configured but
+              could not be written to{status.data.error ? `: ${status.data.error}` : "."} Downloads
+              will fail until this is fixed.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <StorageForm current={current} />
     </div>

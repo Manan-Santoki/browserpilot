@@ -33,7 +33,7 @@ export type AgentArgs = {
   /** Named in the URLs the agent's screenshots are served from. */
   sessionId: string;
   /** Where those screenshots are written, alongside the session's downloads. */
-  filesDir: string;
+  saveFile: (filename: string, bytes: Uint8Array) => Promise<void>;
   onEvent: (event: RobotEvent) => void;
 };
 
@@ -290,7 +290,7 @@ export class SessionManager {
         env: this.config.env,
         nodeBin: this.config.nodeBin,
         sessionId: id,
-        filesDir: downloadsDir,
+        saveFile: (filename, bytes) => this.storeBytes(id, downloadsDir, filename, bytes),
         onEvent: (event) => this.handleEvent(id, event),
       });
     } catch (error) {
@@ -445,6 +445,29 @@ export class SessionManager {
     await session.input.dispatch(event).catch(() => {
       // A dropped keystroke is not worth ending a sign-in over.
     });
+  }
+
+  /**
+   * Put bytes the agent produced into the store under this session.
+   *
+   * Staged through a file because that is what the store takes — and because a
+   * download arrives as one, so both paths end up identical.
+   */
+  private async storeBytes(
+    sessionId: string,
+    stagingDir: string,
+    filename: string,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    const safe = basename(filename) || "file";
+    const staged = join(stagingDir, safe);
+
+    await mkdir(stagingDir, { recursive: true }).catch(() => {});
+    await Bun.write(staged, bytes);
+
+    const store = await this.deps.objects();
+    await store.put(objectKey(sessionId, safe), staged, contentTypeFor(safe));
+    if (store.kind !== "local") await rm(staged, { force: true }).catch(() => {});
   }
 
   private async discardScratch(dir?: string): Promise<void> {

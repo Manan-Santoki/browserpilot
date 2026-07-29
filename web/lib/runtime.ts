@@ -83,6 +83,21 @@ export function startRuntimeSession(
   });
 }
 
+export type StorageStatus = {
+  driver: "local" | "s3";
+  endpoint?: string;
+  bucket?: string;
+  region?: string;
+  /** Proven by writing a probe object and reading it back, not asserted. */
+  reachable: boolean;
+  error?: string;
+};
+
+/** Where the runtime is actually putting files right now. */
+export function runtimeStorageStatus(user: CurrentUser) {
+  return call<StorageStatus>(user, "/api/storage");
+}
+
 /** Open a browser for the person to sign in to a site themselves. */
 export function startRuntimeLogin(user: CurrentUser, siteProfileId: string) {
   return call<{ id: string }>(user, "/api/logins", {
