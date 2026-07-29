@@ -4,6 +4,8 @@ import type { AgentRunner } from "../agent/runner";
 import type { RobotBrowser, SavedCookie } from "../browser/chromium";
 import type { InputSink, RemoteInput } from "../browser/input";
 import type { ScreencastOptions } from "../browser/screencast";
+import { contentTypeFor } from "@browserpilot/core";
+import { objectKey, type ObjectStore } from "../storage/object-store";
 import type { ProfileStore } from "../browser/profiles";
 import { looksSignedOut } from "./signed-out";
 import type { Store, TargetSite } from "../store";
@@ -53,6 +55,8 @@ export type ManagerDeps = {
   profiles: ProfileStore;
   /** Lets a person drive the browser themselves while signing in. */
   createInput: (page: RobotBrowser["page"]) => Promise<InputSink>;
+  /** Where downloads are kept. Resolved per use so a settings change lands. */
+  objects: () => Promise<ObjectStore>;
   store: Store;
   now: () => number;
 };
@@ -221,7 +225,9 @@ export class SessionManager {
       scratchProfileDir = join(this.config.scratchRoot, id);
       try {
         await this.deps.profiles.checkout(siteProfileId, userId, scratchProfileDir);
-      } catch (error) {
+      } catch {
+        // No half-signed-in state: a profile that is gone means signing in
+        // again, which is honest about what the site will see.
         await store.setLinkState(userId, siteProfileId, "none");
         await store.setStatus(id, "failed", "saved login is missing");
         throw new SessionError(
@@ -446,20 +452,33 @@ export class SessionManager {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 
+  /**
+   * Take what the browser downloaded and put it somewhere it will outlive the
+   * container. The browser can only write to a real path, so the file lands on
+   * disk first and is handed to the store from there.
+   */
   private attachDownloads(id: string, browser: RobotBrowser, downloadsDir: string): void {
     browser.onDownload((download) => {
       // basename() prevents a hostile suggested filename from escaping the dir.
       const filename = basename(download.suggestedFilename) || "download";
+      const staged = join(downloadsDir, filename);
+
       void download
-        .saveAs(join(downloadsDir, filename))
-        .then(() =>
+        .saveAs(staged)
+        .then(async () => {
+          const store = await this.deps.objects();
+          await store.put(objectKey(id, filename), staged, contentTypeFor(filename));
+          // Only once it is stored: a file the console cannot fetch should not
+          // be announced as ready.
+          if (store.kind !== "local") await rm(staged, { force: true }).catch(() => {});
+
           this.handleEvent(id, {
             type: "file_ready",
             fileId: filename,
             filename,
             url: sessionFileUrl(id, filename),
-          }),
-        )
+          });
+        })
         .catch((error: Error) =>
           this.handleEvent(id, { type: "error", message: `Download failed: ${error.message}` }),
         );

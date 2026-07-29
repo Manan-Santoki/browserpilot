@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { robotSessions } from "@browserpilot/db";
 import { db } from "@/lib/db";
 import { ticketFor, runtimeHttpUrl } from "@/lib/runtime";
+import { isViewable } from "@browserpilot/core";
 import { getCurrentUser } from "@/lib/session";
 
 /**
@@ -14,7 +15,7 @@ import { getCurrentUser } from "@/lib/session";
  * bytes, which also keeps the runtime off the public link surface.
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string; name: string }> },
 ) {
   const user = await getCurrentUser();
@@ -48,7 +49,7 @@ export async function GET(
       {
         error:
           upstream.status === 404
-            ? "That file is no longer available. Files live with their session and are removed when it ends."
+            ? "That file is no longer available."
             : "Could not fetch that file.",
       },
       { status: upstream.status },
@@ -57,15 +58,17 @@ export async function GET(
 
   const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
 
-  // Screenshots are shown in the conversation and opened full size from it, so
-  // forcing a download on them would turn a look at the page into a saved file.
-  const disposition = contentType.startsWith("image/") ? "inline" : "attachment";
+  // Anything the console can show — a purchase order, a screenshot — is served
+  // inline so the viewer can render it in place. ?download=1 is how the Save
+  // control asks for the same file as a file.
+  const wantsDownload = new URL(req.url).searchParams.get("download") === "1";
+  const disposition = !wantsDownload && isViewable(name) ? "inline" : "attachment";
 
   return new NextResponse(upstream.body, {
     headers: {
       "content-type": contentType,
       "content-disposition": `${disposition}; filename="${name.replace(/"/g, "")}"`,
-      "cache-control": "private, no-store",
+      "cache-control": "private, max-age=300",
     },
   });
 }

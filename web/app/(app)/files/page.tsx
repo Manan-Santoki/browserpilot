@@ -1,17 +1,8 @@
-import Link from "next/link";
 import { desc, eq, inArray } from "drizzle-orm";
 import { robotSessions, sessionEvents, siteProfiles } from "@browserpilot/db";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-
-type FileRow = {
-  filename: string;
-  url: string;
-  sessionId: string;
-  sessionTitle: string | null;
-  siteName: string | null;
-  at: Date;
-};
+import { FilesList, type SessionFiles } from "./files-list";
 
 export default async function FilesPage() {
   const user = await requireUser();
@@ -22,6 +13,7 @@ export default async function FilesPage() {
     .select({
       id: robotSessions.id,
       title: robotSessions.title,
+      startedAt: robotSessions.startedAt,
       siteName: siteProfiles.name,
     })
     .from(robotSessions)
@@ -31,7 +23,7 @@ export default async function FilesPage() {
     .limit(300);
 
   const byId = new Map(sessions.map((s) => [s.id, s]));
-  const files: FileRow[] = [];
+  const groups: SessionFiles[] = [];
 
   if (byId.size > 0) {
     const events = await db()
@@ -44,8 +36,11 @@ export default async function FilesPage() {
       .where(inArray(sessionEvents.robotSessionId, [...byId.keys()]))
       .orderBy(desc(sessionEvents.createdAt));
 
-    // Same filename downloaded twice in one session is one entry, newest first.
+    // Newest first, and one entry per filename per session: fetching the same
+    // document twice replaced it in the store, so it is one file.
     const seen = new Set<string>();
+    const collected = new Map<string, SessionFiles>();
+
     for (const event of events) {
       const payload = event.payload as { type?: string; filename?: string; url?: string };
       if (payload.type !== "file_ready" || !payload.filename || !payload.url) continue;
@@ -55,60 +50,53 @@ export default async function FilesPage() {
       seen.add(key);
 
       const session = byId.get(event.robotSessionId);
-      files.push({
+      if (!session) continue;
+
+      let group = collected.get(event.robotSessionId);
+      if (!group) {
+        group = {
+          sessionId: session.id,
+          title: session.title ?? session.siteName ?? "Session",
+          siteName: session.siteName,
+          startedAt: session.startedAt.toISOString(),
+          files: [],
+        };
+        collected.set(event.robotSessionId, group);
+      }
+
+      group.files.push({
         filename: payload.filename,
         url: payload.url,
-        sessionId: event.robotSessionId,
-        sessionTitle: session?.title ?? null,
-        siteName: session?.siteName ?? null,
-        at: event.createdAt,
+        at: event.createdAt.toISOString(),
       });
     }
+
+    groups.push(...collected.values());
   }
+
+  const total = groups.reduce((sum, group) => sum + group.files.length, 0);
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Files</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Everything the robot has downloaded{isAdmin ? " across all users" : ""}. Files stay
-          available after their session ends.
+        <p className="text-muted-foreground mt-1 text-sm">
+          {total === 0
+            ? "Everything the robot downloads is kept here."
+            : `${total} file${total === 1 ? "" : "s"}${
+                isAdmin ? " across all users" : ""
+              }, under the session that fetched them.`}
         </p>
       </div>
 
-      {files.length === 0 ? (
+      {groups.length === 0 ? (
         <div className="rounded-lg border border-dashed px-6 py-16 text-center">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             No downloads yet. Ask the robot to fetch a document and it will appear here.
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-border rounded-lg border">
-          {files.map((file) => (
-            <li
-              key={`${file.sessionId}:${file.filename}`}
-              className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm"
-            >
-              <a
-                href={file.url}
-                className="min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
-              >
-                ⬇ {file.filename}
-              </a>
-
-              <Link
-                href={`/sessions/${file.sessionId}`}
-                className="text-muted-foreground hover:text-foreground truncate transition-colors"
-              >
-                {file.sessionTitle ?? file.siteName ?? "session"}
-              </Link>
-
-              <span className="whitespace-nowrap text-xs text-muted-foreground">
-                {new Date(file.at).toLocaleString()}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <FilesList groups={groups} />
       )}
     </div>
   );

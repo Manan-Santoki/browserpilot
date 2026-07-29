@@ -27,9 +27,10 @@ describe("downloads", () => {
       suggestedFilename: "PO-2026-0142.pdf",
       saveAs: async (path) => {
         saved.push(path);
+        await Bun.write(path, "%PDF-1.4 a purchase order\n");
       },
     });
-    await Bun.sleep(50);
+    await Bun.sleep(150);
 
     expect(events.find((e) => e.type === "file_ready")).toMatchObject({
       type: "file_ready",
@@ -54,14 +55,40 @@ describe("downloads", () => {
       suggestedFilename: "../../etc/passwd",
       saveAs: async (path) => {
         saved.push(path);
+        await Bun.write(path, "root:x:0:0\n");
       },
     });
-    await Bun.sleep(50);
+    await Bun.sleep(150);
 
     expect(events.find((e) => e.type === "file_ready")).toMatchObject({ filename: "passwd" });
     // The written path must stay inside the session's own directory.
     expect(saved[0]).toContain(`/${id}/passwd`);
     expect(saved[0]).not.toContain("..");
+
+    await manager.stop(id);
+  });
+
+  test("the file is put in the store, under its session, and comes back out", async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    state.fireDownload!({
+      suggestedFilename: "invoice.pdf",
+      saveAs: async (path) => {
+        await Bun.write(path, "%PDF-1.4 invoice\n");
+      },
+    });
+    await Bun.sleep(200);
+
+    const store = await deps.objects();
+    const stored = await store.get(`sessions/${id}/invoice.pdf`);
+    expect(stored).toBeDefined();
+    expect(await new Response(stored!).text()).toContain("invoice");
+
+    // And it is listed under that session rather than loose in the bucket.
+    const listed = await store.list(`sessions/${id}`);
+    expect(listed.map((o) => o.key)).toEqual([`sessions/${id}/invoice.pdf`]);
 
     await manager.stop(id);
   });

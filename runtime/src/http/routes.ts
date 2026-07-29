@@ -4,6 +4,8 @@ import { verifyTicket, type TicketClaims } from "@browserpilot/core";
 import type { ClientCommand, RobotEvent } from "../session/events";
 import { SessionError, type SessionManager } from "../session/manager";
 import type { Store } from "../store";
+import { contentTypeFor } from "@browserpilot/core";
+import { objectKey, type ObjectStore } from "../storage/object-store";
 
 type SocketData = {
   sessionId: string;
@@ -16,6 +18,8 @@ export type ServerOptions = {
   port: number;
   ticketSecret: string;
   store: Store;
+  /** Where session downloads are kept. */
+  objects: () => Promise<ObjectStore>;
   /** Where per-session download directories live. */
   downloadsRoot: string;
 };
@@ -195,6 +199,26 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         }
       }
 
+      const fileListMatch = /^\/api\/sessions\/([^/]+)\/files$/.exec(path);
+      if (fileListMatch && req.method === "GET") {
+        const sessionId = fileListMatch[1]!;
+        const ownerId = await opts.store.sessionOwner(sessionId);
+        if (!ownerId) return json({ error: "No such session" }, 404);
+        if (claims.role !== "ADMIN" && ownerId !== claims.userId) {
+          return json({ error: "Not your session" }, 403);
+        }
+
+        const store = await opts.objects();
+        const objects = await store.list(`sessions/${sessionId}`);
+        return json({
+          files: objects.map((object) => ({
+            filename: object.key.slice(object.key.lastIndexOf("/") + 1),
+            size: object.size,
+            updatedAt: object.updatedAt.toISOString(),
+          })),
+        });
+      }
+
       const fileMatch = /^\/api\/sessions\/([^/]+)\/files\/(.+)$/.exec(path);
       if (fileMatch && req.method === "GET") {
         const sessionId = fileMatch[1]!;
@@ -214,11 +238,27 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           }
         }
 
-        // basename() keeps a crafted filename from escaping the session's dir.
-        const dir = live?.browser.downloadsDir ?? join(opts.downloadsRoot, sessionId);
-        const file = Bun.file(join(dir, basename(fileMatch[2]!)));
-        if (!(await file.exists())) return json({ error: "No such file" }, 404);
-        return new Response(file);
+        // basename() keeps a crafted filename from escaping the session's keys.
+        const filename = basename(decodeURIComponent(fileMatch[2]!));
+        const store = await opts.objects();
+        const key = objectKey(sessionId, filename);
+
+        const object = await store.head(key);
+        if (!object) return json({ error: "No such file" }, 404);
+
+        const body = await store.get(key);
+        if (!body) return json({ error: "No such file" }, 404);
+
+        // inline so the console can show a purchase order in its viewer; the
+        // type was decided when the file was stored, from its name.
+        return new Response(body, {
+          headers: {
+            "content-type": contentTypeFor(filename),
+            "content-length": String(object.size),
+            "content-disposition": `inline; filename="${filename.replace(/"/g, "")}"`,
+            "cache-control": "private, max-age=300",
+          },
+        });
       }
 
       return json({ error: "Not found" }, 404);

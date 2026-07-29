@@ -13,6 +13,12 @@ import {
 import type { SavedCookie } from "./browser/chromium";
 import type { RobotEvent, SessionStatus } from "./session/events";
 import { parseSettings, type RuntimeSettings } from "./settings";
+import {
+  STORAGE_KEYS,
+  resolveStorageSettings,
+  type StorageEnv,
+  type StorageSettings,
+} from "./storage/settings";
 
 /** Statuses that count as "still holding a browser" for the concurrency caps. */
 export const LIVE_STATUSES = ["starting", "idle", "working", "awaiting_approval"] as const;
@@ -150,6 +156,20 @@ export class Store {
     }
 
     return { ...account, cookies };
+  }
+
+  /**
+   * Where this deployment keeps downloads, from the environment and whatever
+   * an administrator has saved. The secret is unsealed here because this is
+   * the only object holding the master key.
+   */
+  async storageSettings(env: StorageEnv): Promise<StorageSettings> {
+    const rows = await this.db
+      .select({ key: settingsTable.key, value: settingsTable.value })
+      .from(settingsTable)
+      .where(inArray(settingsTable.key, [...STORAGE_KEYS]));
+
+    return resolveStorageSettings(rows, env, (sealed) => decryptSecret(sealed, this.masterKey));
   }
 
   /** Keep the cookies a sign-in produced, sealed with the master key. */

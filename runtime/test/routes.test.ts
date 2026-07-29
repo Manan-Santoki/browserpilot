@@ -1,4 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { createLocalStore, objectKey } from "../src/storage/object-store";
+
+/** Stage a file into the object store, standing in for a real download. */
+async function storeFile(sessionId: string, filename: string, body: string): Promise<void> {
+  const staged = `/tmp/bp-routes-staged-${filename}`;
+  await Bun.write(staged, body);
+  await createLocalStore(managerConfig.downloadsRoot).put(objectKey(sessionId, filename), staged);
+}
 import { mintTicket } from "@browserpilot/core";
 import { createServer } from "../src/http/routes";
 import { SessionManager } from "../src/session/manager";
@@ -29,6 +37,7 @@ function start() {
     port: 0,
     ticketSecret: TICKET_SECRET,
     store,
+    objects: async () => createLocalStore(managerConfig.downloadsRoot),
     downloadsRoot: managerConfig.downloadsRoot,
   });
   running = handle;
@@ -298,9 +307,8 @@ describe("downloads outlive their session", () => {
     const { port, manager } = start();
     const id = await manager.create(fx.userId, fx.siteId);
 
-    // Put a file where the session's downloads live, then end the session.
-    const dir = `${managerConfig.downloadsRoot}/${id}`;
-    await Bun.write(`${dir}/report.pdf`, "%PDF-1.4 fake");
+    // Put a file in the store the way a download would, then end the session.
+    await storeFile(id, "report.pdf", "%PDF-1.4 fake");
     await manager.stop(id);
     expect(manager.get(id)).toBeUndefined();
 
@@ -315,7 +323,7 @@ describe("downloads outlive their session", () => {
   test("someone else still cannot fetch it", async () => {
     const { port, manager } = start();
     const id = await manager.create(fx.userId, fx.siteId);
-    await Bun.write(`${managerConfig.downloadsRoot}/${id}/private.pdf`, "%PDF-1.4 secret");
+    await storeFile(id, "private.pdf", "%PDF-1.4 secret");
     await manager.stop(id);
 
     const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/files/private.pdf`, {

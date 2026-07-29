@@ -194,6 +194,20 @@ describe("signing in to a site yourself", () => {
     await manager.stop(id);
   }, DB_HEAVY_TIMEOUT_MS);
 
+  test("a lost profile asks for a fresh sign-in rather than half-restoring one", async () => {
+    await resetLink();
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+
+    await manager.saveLogin(await manager.createLogin(fx.userId, fx.siteId));
+
+    // A wiped volume, a pruned disk — the profile is simply gone.
+    state.linked.clear();
+
+    await expect(manager.create(fx.userId, fx.siteId)).rejects.toThrow(/sign in again/i);
+    expect(await linkState()).toBe("none");
+  }, DB_HEAVY_TIMEOUT_MS);
+
   test("landing on the sign-in page marks the login expired and refuses the session", async () => {
     await resetLink();
     const { deps, state } = fakeDeps();

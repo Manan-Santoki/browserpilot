@@ -2,6 +2,7 @@ import { and, eq, inArray, like, lt } from "drizzle-orm";
 import { encryptSecret } from "@browserpilot/core";
 import { createDatabase, robotSessions, siteAccounts, siteProfiles, users } from "@browserpilot/db";
 import { Store } from "../src/store";
+import { createLocalStore } from "../src/storage/object-store";
 import type { ManagerDeps } from "../src/session/manager";
 import type { RobotEvent } from "../src/session/events";
 import type { RobotBrowser } from "../src/browser/chromium";
@@ -167,6 +168,7 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
   const deps: ManagerDeps = {
     store,
     profiles: fakeProfiles(state),
+    objects: async () => createLocalStore("/tmp/bp-test-objects"),
     createInput: async () => ({
       dispatch: async (event) => {
         state.dispatched.push(event);

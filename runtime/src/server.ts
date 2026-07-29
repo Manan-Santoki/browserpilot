@@ -4,6 +4,8 @@ import { launchRobotBrowser } from "./browser/chromium";
 import { createInputSink } from "./browser/input";
 import { createProfileStore } from "./browser/profiles";
 import { startScreencast } from "./browser/screencast";
+import { createLocalStore, createS3Store, type ObjectStore } from "./storage/object-store";
+import { storageEnv } from "./storage/settings";
 import { startAgent } from "./agent/runner";
 import { SessionManager } from "./session/manager";
 import { createServer } from "./http/routes";
@@ -25,6 +27,28 @@ await rm(config.scratchRoot, { recursive: true, force: true }).catch(() => {});
 
 const profiles = createProfileStore(config.profilesRoot);
 
+/**
+ * Where downloads go, decided from the environment and whatever an
+ * administrator has since saved. Rebuilt only when that answer changes, so
+ * editing the settings takes effect without a redeploy and without paying for
+ * a new client on every download.
+ */
+let cached: { signature: string; store: ObjectStore } | undefined;
+async function objects(): Promise<ObjectStore> {
+  const settings = await store.storageSettings(storageEnv(process.env));
+  const signature = JSON.stringify(settings);
+  if (cached?.signature !== signature) {
+    cached = {
+      signature,
+      store:
+        settings.driver === "s3"
+          ? createS3Store(settings.s3)
+          : createLocalStore(config.downloadsRoot),
+    };
+  }
+  return cached.store;
+}
+
 const manager = new SessionManager(
   {
     downloadsRoot: config.downloadsRoot,
@@ -40,6 +64,7 @@ const manager = new SessionManager(
     startAgent: (args) => startAgent(args),
     startScreencast: (context, onFrame, opts) => startScreencast(context, onFrame, opts),
     createInput: (page) => createInputSink(page),
+    objects,
   },
 );
 
@@ -47,6 +72,7 @@ const { server } = createServer(manager, {
   port: config.port,
   ticketSecret: config.ticketSecret,
   store,
+  objects,
   downloadsRoot: config.downloadsRoot,
 });
 

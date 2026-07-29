@@ -4,6 +4,7 @@ import { encryptSecret } from "@browserpilot/core";
 import { createDatabase, robotSessions, siteAccounts, siteProfiles, users } from "@browserpilot/db";
 import { SessionManager, SessionError, type ManagerDeps } from "../src/session/manager";
 import { Store } from "../src/store";
+import { createLocalStore } from "../src/storage/object-store";
 import type { RobotEvent } from "../src/session/events";
 import { withTestSettings } from "./support/settings";
 import { DB_HEAVY_TIMEOUT_MS } from "./helpers";
@@ -101,6 +102,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
         linked.delete(`${site}:${user}`);
       },
     },
+    objects: async () => createLocalStore("/tmp/bp-mgr-test-objects"),
     createInput: async () => ({
       dispatch: async (event) => {
         dispatched.push(event);
