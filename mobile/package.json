@@ -1,0 +1,33 @@
+{
+  "name": "@browserpilot/mobile",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
+    "expo": "~57.0.8",
+    "expo-camera": "^57.0.3",
+    "expo-constants": "^57.0.7",
+    "expo-device": "^57.0.1",
+    "expo-image": "^57.0.1",
+    "expo-linking": "^57.0.4",
+    "expo-router": "^57.0.8",
+    "expo-secure-store": "^57.0.1",
+    "expo-status-bar": "^57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-safe-area-context": "^5.8.0",
+    "react-native-screens": "^4.26.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true
+}

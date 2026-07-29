@@ -54,10 +54,20 @@ export async function createSession(userId: string): Promise<void> {
   });
 }
 
-/** Returns the signed-in user, or null. Never throws on a bad cookie. */
+/**
+ * Returns the signed-in user, or null. Never throws on a bad credential.
+ *
+ * A browser presents the session cookie. The phone has no cookie jar worth
+ * relying on across platforms, so it presents the same session token as a
+ * bearer header instead — one kind of session, two ways of carrying it, which
+ * is why every route written for the console also serves the app.
+ */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
   const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  const bearer = (await headers()).get("authorization");
+  const token =
+    cookieStore.get(SESSION_COOKIE)?.value ??
+    (bearer?.toLowerCase().startsWith("bearer ") ? bearer.slice(7).trim() : undefined);
   if (!token) return null;
 
   const rows = await db()

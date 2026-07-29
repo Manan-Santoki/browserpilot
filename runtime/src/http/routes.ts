@@ -13,6 +13,8 @@ import { describeStorage, type StorageEnv } from "../storage/settings";
 type SocketData = {
   sessionId: string;
   claims: TicketClaims;
+  /** Set when the client asked for frames as base64 text rather than binary. */
+  base64Frames?: boolean;
   unsubscribe?: () => void;
   unsubscribeFrames?: () => void;
 };
@@ -334,6 +336,13 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           // turns into a growing delay, and the viewer watches the past — which
           // reads as the stream being broken rather than merely slower.
           if (ws.getBufferedAmount() > FRAME_BACKLOG_BYTES) return;
+
+          // The frame is already base64 on the way in, so text costs the
+          // runtime less than binary — it is the wire that pays, not us.
+          if (ws.data.base64Frames) {
+            ws.send(JSON.stringify({ type: "frame", data: frame }));
+            return;
+          }
           ws.send(Buffer.from(frame, "base64"));
         });
       },
@@ -360,6 +369,9 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             break;
           case "preview":
             void manager.setPreview(id, command.enabled);
+            break;
+          case "frame_encoding":
+            ws.data.base64Frames = command.encoding === "base64";
             break;
           case "viewport":
             void manager.setPreviewSize(id, command.cssWidth, command.pixelRatio);

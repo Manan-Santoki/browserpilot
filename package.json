@@ -2,12 +2,19 @@
   "name": "browserpilot",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["core", "db", "runtime", "web"],
+  "workspaces": [
+    "core",
+    "db",
+    "runtime",
+    "web",
+    "mobile"
+  ],
   "scripts": {
     "dev:runtime": "cd runtime && bun run dev",
     "dev:web": "cd web && bun run dev",
     "test": "bun test core db runtime",
     "db:generate": "cd db && bunx drizzle-kit generate",
-    "db:migrate": "cd db && bunx drizzle-kit migrate"
+    "db:migrate": "cd db && bunx drizzle-kit migrate",
+    "dev:mobile": "cd mobile && bun run start"
   }
 }

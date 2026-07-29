@@ -42,6 +42,9 @@ export type ClientCommand =
   // How large the viewer is showing the stream, so the sharp frame is taken at
   // the resolution it will actually be displayed at and no larger.
   | { type: "viewport"; cssWidth: number; pixelRatio: number }
+  // Frames go out as binary by default. A client that would rather decode text
+  // — React Native, where binary frames are awkward — asks for base64 instead.
+  | { type: "frame_encoding"; encoding: "binary" | "base64" }
   // Only a sign-in session accepts these: the person driving the browser.
   | { type: "input"; event: RemoteInput }
   | { type: "stop" };
