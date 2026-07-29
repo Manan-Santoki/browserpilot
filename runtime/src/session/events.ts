@@ -4,7 +4,9 @@ export type SessionStatus =
   | "working"
   | "awaiting_approval"
   | "stopped"
-  | "failed";
+  | "failed"
+  /** Was live when the runtime restarted, so its browser is gone. */
+  | "interrupted";
 
 export type RobotEvent =
   | { type: "session_status"; status: SessionStatus; detail?: string }

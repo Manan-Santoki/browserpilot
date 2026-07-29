@@ -15,22 +15,52 @@ const AUTO_TOOLS = new Set([
   "mcp__playwright__browser_click",
 ]);
 
-// Only the element being acted on is inspected — text the agent types into a
-// field can legitimately contain these words.
-const DESTRUCTIVE_ELEMENT = /\b(delete|remove|cancel|void|discard|archive|revoke|reset)\b/i;
+/**
+ * Words that make a click destructive. A site profile can supply its own list —
+ * "archive" may be routine in one application and irreversible in another.
+ */
+export const DEFAULT_DESTRUCTIVE_WORDS = [
+  "delete",
+  "remove",
+  "cancel",
+  "void",
+  "discard",
+  "archive",
+  "revoke",
+  "reset",
+];
 
 const ELEMENT_KEYS = ["element", "ref", "selector"] as const;
+
+function buildPattern(words: string[]): RegExp {
+  const escaped = words
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (escaped.length === 0) return /(?!)/; // matches nothing
+  return new RegExp(`\\b(${escaped.join("|")})\\b`, "i");
+}
+
+const DEFAULT_PATTERN = buildPattern(DEFAULT_DESTRUCTIVE_WORDS);
 
 export function classifyToolUse(
   toolName: string,
   input: Record<string, unknown>,
+  destructiveWords?: string[] | null,
 ): "auto" | "approve" {
   if (!AUTO_TOOLS.has(toolName)) return "approve";
 
   if (toolName === "mcp__playwright__browser_click") {
+    const pattern =
+      destructiveWords && destructiveWords.length > 0
+        ? buildPattern(destructiveWords)
+        : DEFAULT_PATTERN;
+
+    // Only the element being acted on is inspected — text the agent types into
+    // a field can legitimately contain these words.
     for (const key of ELEMENT_KEYS) {
       const value = input[key];
-      if (typeof value === "string" && DESTRUCTIVE_ELEMENT.test(value)) return "approve";
+      if (typeof value === "string" && pattern.test(value)) return "approve";
     }
   }
 

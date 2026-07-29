@@ -1,170 +1,232 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { mintTicket } from "@browserpilot/core";
 import { createServer } from "../src/http/routes";
-import { SessionManager, type ManagerDeps } from "../src/session/manager";
+import { SessionManager } from "../src/session/manager";
 import type { RobotEvent } from "../src/session/events";
+import { createFixtures, fakeDeps, managerConfig, store, type Fixtures } from "./helpers";
 
-const USER = {
-  userId: "3f7c1a52-9d4e-4b1a-8f2c-1a2b3c4d5e6f",
-  email: "owner@jwm.test",
-  role: "admin",
-  name: "Manan Santoki",
-};
-
-const config = {
-  jwmUrl: "https://jwm.example.com",
-  sessionSecret: "s",
-  downloadsRoot: "/tmp/bp-test-dl",
-  model: "claude-opus-5",
-  maxConcurrentSessions: 2,
-  idleTimeoutMs: 600_000,
-  hardCapMs: 3_600_000,
-  env: {},
-};
-
+const TICKET_SECRET = "routes-ticket-secret";
+let fx: Fixtures;
 let running: { stop(): void } | undefined;
 
-function start() {
-  const sent: string[] = [];
-  let emit: ((e: RobotEvent) => void) | undefined;
-
-  const deps: ManagerDeps = {
-    now: () => Date.now(),
-    launchBrowser: async () => ({
-      cdpEndpoint: "http://127.0.0.1:1",
-      downloadsDir: "/tmp/bp-test-dl",
-      page: {} as never,
-      context: {} as never,
-      onDownload: () => {},
-      close: async () => {},
-    }),
-    startAgent: async (o) => {
-      emit = o.onEvent;
-      return {
-        send: (t: string) => sent.push(t),
-        approve: () => {},
-        stop: async () => {},
-      };
-    },
-    startScreencast: async () => ({ stop: async () => {} }),
-  };
-
-  const manager = new SessionManager(config, deps);
-  const handle = createServer(manager, { port: 0, debugUser: USER, publicDir: "./public" });
-  running = handle;
-  return {
-    manager,
-    sent,
-    port: handle.server.port,
-    fire: (e: RobotEvent) => emit!(e),
-  };
-}
+beforeAll(async () => {
+  fx = await createFixtures("routes");
+});
 
 afterEach(() => {
   running?.stop();
   running = undefined;
 });
 
-describe("HTTP routes", () => {
-  test("POST /api/sessions creates a session and returns its id", async () => {
-    const { port, manager } = start();
-    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, { method: "POST" });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string };
-    expect(manager.get(body.id)).toBeDefined();
-  });
+afterAll(async () => {
+  await fx.cleanup();
+});
 
-  test("GET /api/sessions lists sessions without leaking internals", async () => {
+function start() {
+  const { deps, state } = fakeDeps();
+  const manager = new SessionManager(managerConfig, deps);
+  const handle = createServer(manager, { port: 0, ticketSecret: TICKET_SECRET, store });
+  running = handle;
+  return { manager, state, port: handle.server.port };
+}
+
+const ticketFor = (sessionId: string, userId: string, role: "ADMIN" | "USER" = "USER") =>
+  mintTicket({ sessionId, userId, role }, TICKET_SECRET);
+
+describe("authentication", () => {
+  test("health is the only route reachable without a ticket", async () => {
     const { port } = start();
-    await fetch(`http://127.0.0.1:${port}/api/sessions`, { method: "POST" });
-    const body = (await fetch(`http://127.0.0.1:${port}/api/sessions`).then((r) => r.json())) as {
-      sessions: Array<Record<string, unknown>>;
-    };
-    expect(body.sessions).toHaveLength(1);
-    expect(body.sessions[0]).toHaveProperty("status");
-    expect(body.sessions[0]).not.toHaveProperty("browser");
-    expect(body.sessions[0]).not.toHaveProperty("agent");
+    expect((await fetch(`http://127.0.0.1:${port}/health`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${port}/api/sessions`)).status).toBe(401);
   });
 
-  test("POST /api/sessions/:id/stop removes the session", async () => {
+  test("a ticket signed with the wrong secret is refused", async () => {
+    const { port } = start();
+    const bad = await mintTicket(
+      { sessionId: "any", userId: fx.userId, role: "USER" },
+      "not-the-secret",
+    );
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      headers: { authorization: `Bearer ${bad}` },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("an expired ticket is refused", async () => {
+    const { port } = start();
+    const expired = await mintTicket(
+      { sessionId: "any", userId: fx.userId, role: "USER" },
+      TICKET_SECRET,
+      -1,
+    );
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      headers: { authorization: `Bearer ${expired}` },
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("session routes", () => {
+  test("creating a session requires a site and returns its id", async () => {
     const { port, manager } = start();
-    const { id } = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+    const ticket = await ticketFor("pending", fx.userId);
+
+    const missing = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
       method: "POST",
-    }).then((r) => r.json())) as { id: string };
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(missing.status).toBe(400);
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/stop`, { method: "POST" });
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({ siteProfileId: fx.siteId }),
+    });
     expect(res.status).toBe(200);
+
+    const { id } = (await res.json()) as { id: string };
+    expect(manager.get(id)).toBeDefined();
+    await manager.stop(id);
+  });
+
+  test("a user with no account on the site gets a specific 409", async () => {
+    const { port } = start();
+    const ticket = await ticketFor("pending", fx.otherUserId);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({ siteProfileId: fx.siteId }),
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { code: string }).toMatchObject({ code: "no_site_account" });
+  });
+
+  test("listing shows only your own sessions unless you are an admin", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    const mine = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.userId)}` },
+    }).then((r) => r.json())) as { sessions: unknown[] };
+    expect(mine.sessions).toHaveLength(1);
+
+    const theirs = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.otherUserId)}` },
+    }).then((r) => r.json())) as { sessions: unknown[] };
+    expect(theirs.sessions).toHaveLength(0);
+
+    const admin = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.otherUserId, "ADMIN")}` },
+    }).then((r) => r.json())) as { sessions: unknown[] };
+    expect(admin.sessions).toHaveLength(1);
+
+    await manager.stop(id);
+  });
+
+  test("another user cannot stop your session, but an admin can", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    const denied = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/stop`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.otherUserId)}` },
+    });
+    expect(denied.status).toBe(403);
+    expect(manager.get(id)).toBeDefined();
+
+    const allowed = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/stop`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.otherUserId, "ADMIN")}` },
+    });
+    expect(allowed.status).toBe(200);
     expect(manager.get(id)).toBeUndefined();
-  });
-
-  test("returns 404 for an unknown session", async () => {
-    const { port } = start();
-    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/nope/stop`, { method: "POST" });
-    expect(res.status).toBe(404);
-  });
-
-  test("returns 429 when the session cap is reached", async () => {
-    const { port } = start();
-    await fetch(`http://127.0.0.1:${port}/api/sessions`, { method: "POST" });
-    await fetch(`http://127.0.0.1:${port}/api/sessions`, { method: "POST" });
-    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, { method: "POST" });
-    expect(res.status).toBe(429);
   });
 });
 
 describe("WebSocket", () => {
-  test("forwards agent events to the connected client", async () => {
-    const { port, fire } = start();
-    const { id } = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
-      method: "POST",
-    }).then((r) => r.json())) as { id: string };
+  test("a ticket for a different session cannot open the socket", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    const wrong = await ticketFor("some-other-session", fx.userId);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}?ticket=${wrong}`);
+    const closed = await new Promise<boolean>((resolve) => {
+      ws.onclose = () => resolve(true);
+      ws.onopen = () => resolve(false);
+    });
+
+    expect(closed).toBe(true);
+    await manager.stop(id);
+  });
+
+  test("the owner's ticket opens the socket and receives events", async () => {
+    const { port, manager, state } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    const ticket = await ticketFor(id, fx.userId);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}?ticket=${ticket}`);
     const received: RobotEvent[] = [];
     ws.onmessage = (e) => {
       if (typeof e.data === "string") received.push(JSON.parse(e.data));
     };
     await new Promise((resolve) => (ws.onopen = resolve));
 
-    fire({ type: "agent_text", text: "hello from robot" });
-    await Bun.sleep(50);
+    expect(received[0]).toEqual({ type: "session_status", status: "idle" });
 
+    state.emit!({ type: "agent_text", text: "hello from robot" });
+    await Bun.sleep(100);
     expect(received).toContainEqual({ type: "agent_text", text: "hello from robot" });
+
     ws.close();
+    await manager.stop(id);
   });
 
-  test("a user_msg command reaches the agent", async () => {
-    const { port, sent } = start();
-    const { id } = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
-      method: "POST",
-    }).then((r) => r.json())) as { id: string };
+  test("a user message sent over the socket reaches the agent", async () => {
+    const { port, manager, state } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    const ticket = await ticketFor(id, fx.userId);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}?ticket=${ticket}`);
     await new Promise((resolve) => (ws.onopen = resolve));
     ws.send(JSON.stringify({ type: "user_msg", text: "create a PO" }));
-    await Bun.sleep(50);
+    await Bun.sleep(100);
 
-    expect(sent).toEqual(["create a PO"]);
+    expect(state.sent).toEqual(["create a PO"]);
     ws.close();
+    await manager.stop(id);
   });
 
-  test("sends the current status on connect", async () => {
-    const { port } = start();
-    const { id } = (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
-      method: "POST",
-    }).then((r) => r.json())) as { id: string };
+  test("preview frames arrive as binary on the same socket", async () => {
+    const { port, manager, state } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    const ticket = await ticketFor(id, fx.userId);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}`);
-    const first = await new Promise<RobotEvent>((resolve) => {
-      ws.onmessage = (e) => resolve(JSON.parse(e.data as string));
-    });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${id}?ticket=${ticket}`);
+    ws.binaryType = "arraybuffer";
+    let binaryFrames = 0;
+    ws.onmessage = (e) => {
+      if (typeof e.data !== "string") binaryFrames++;
+    };
+    await new Promise((resolve) => (ws.onopen = resolve));
 
-    expect(first).toEqual({ type: "session_status", status: "idle" });
+    ws.send(JSON.stringify({ type: "preview", enabled: true }));
+    await Bun.sleep(120);
+    state.pushFrame!(Buffer.from("fake-jpeg").toString("base64"));
+    await Bun.sleep(120);
+
+    expect(binaryFrames).toBe(1);
     ws.close();
+    await manager.stop(id);
   });
 
-  test("rejects a socket for an unknown session", async () => {
+  test("a socket for an unknown session is rejected", async () => {
     const { port } = start();
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/does-not-exist`);
+    const ticket = await ticketFor("does-not-exist", fx.userId);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/does-not-exist?ticket=${ticket}`);
+
     const closed = await new Promise<boolean>((resolve) => {
       ws.onclose = () => resolve(true);
       ws.onopen = () => resolve(false);

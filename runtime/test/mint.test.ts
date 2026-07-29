@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { jwtVerify } from "jose";
-import { mintRobotCookie, ROBOT_COOKIE_NAME, type JwmUser } from "../src/auth/mint";
+import { mintRobotCookie, type TargetUser } from "../src/auth/mint";
 
-const USER: JwmUser = {
+const USER: TargetUser = {
   userId: "3f7c1a52-9d4e-4b1a-8f2c-1a2b3c4d5e6f",
   email: "owner@jwm.test",
   role: "admin",
@@ -11,8 +11,10 @@ const USER: JwmUser = {
 const SECRET = "shared-with-jwm";
 
 describe("mintRobotCookie", () => {
-  test("cookie name matches JWM's", () => {
-    expect(ROBOT_COOKIE_NAME).toBe("jwm-session");
+  test("carries whatever claims the target expects", async () => {
+    const token = await mintRobotCookie(USER, SECRET);
+    // The cookie NAME is a per-site setting now, not a constant here.
+    expect(token.split(".")).toHaveLength(3);
   });
 
   test("token verifies with the shared secret and carries JWM's required claims", async () => {

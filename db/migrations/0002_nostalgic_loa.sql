@@ -1,0 +1,1 @@
+ALTER TABLE "site_profiles" ADD COLUMN "cookie_name" text DEFAULT 'session' NOT NULL;

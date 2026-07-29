@@ -9,6 +9,7 @@ import {
 import { classifyToolUse } from "./policy";
 import { buildSystemPrompt } from "./prompt";
 import type { RobotEvent } from "../session/events";
+import type { TargetSite } from "../store";
 
 export type QueryFn = (params: { prompt: AsyncIterable<never>; options?: Options }) => Query;
 
@@ -26,7 +27,8 @@ export function playwrightMcpCliPath(): string {
 
 export type StartAgentOptions = {
   cdpEndpoint: string;
-  jwmUrl: string;
+  /** The target this agent drives, loaded from the database. */
+  site: TargetSite;
   model: string;
   env: Record<string, string>;
   /** Node binary used to run the MCP server. Override when it isn't on PATH. */
@@ -123,7 +125,7 @@ export async function startAgent(
     toolName: string,
     toolInput: Record<string, unknown>,
   ): Promise<PermissionResult> => {
-    if (classifyToolUse(toolName, toolInput) === "auto") {
+    if (classifyToolUse(toolName, toolInput, opts.site.destructivePatterns) === "auto") {
       return { behavior: "allow", updatedInput: toolInput };
     }
 
@@ -149,7 +151,7 @@ export async function startAgent(
   const options: Options = {
     model: opts.model,
     env: subprocessEnv(opts.env),
-    systemPrompt: buildSystemPrompt(opts.jwmUrl),
+    systemPrompt: buildSystemPrompt(opts.site),
     // The browser is the agent's entire world. Without this the SDK hands it
     // the full Claude Code toolset — Bash, Read, Write, and filesystem access
     // to the runtime host, none of which it has any business touching.

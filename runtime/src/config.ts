@@ -2,15 +2,20 @@ export type AiCredential =
   | { kind: "oauth"; value: string }
   | { kind: "apiKey"; value: string };
 
+/**
+ * Bootstrap configuration only.
+ *
+ * Target sites, session caps, and timeouts are database rows edited in the
+ * console — they are deliberately absent here. What remains is the set of
+ * values needed before any row can be read, plus process-level plumbing.
+ */
 export type RuntimeConfig = {
   port: number;
-  jwmUrl: string;
-  sessionSecret: string;
+  databaseUrl: string;
+  masterKey: string;
+  ticketSecret: string;
   downloadsRoot: string;
   model: string;
-  maxConcurrentSessions: number;
-  idleTimeoutMs: number;
-  hardCapMs: number;
   nodeBin: string;
   aiCredential: AiCredential;
 };
@@ -38,15 +43,20 @@ function readCredential(env: Record<string, string | undefined>): AiCredential {
 }
 
 export function loadConfig(env: Record<string, string | undefined>): RuntimeConfig {
+  const masterKey = required(env, "BP_MASTER_KEY");
+  // Checked here rather than at first use: a key too short to seal a secret
+  // should stop the process at boot, not when someone registers a site.
+  if (masterKey.length < 32) {
+    throw new Error("BP_MASTER_KEY must be at least 32 characters");
+  }
+
   return {
     port: num(env, "BP_PORT", 8787),
-    jwmUrl: required(env, "BP_JWM_URL").replace(/\/+$/, ""),
-    sessionSecret: required(env, "SESSION_SECRET"),
+    databaseUrl: required(env, "DATABASE_URL"),
+    masterKey,
+    ticketSecret: required(env, "BP_TICKET_SECRET"),
     downloadsRoot: env.BP_DOWNLOADS_DIR?.trim() || "./downloads",
     model: env.BP_MODEL?.trim() || "claude-opus-5",
-    maxConcurrentSessions: num(env, "BP_MAX_SESSIONS", 2),
-    idleTimeoutMs: num(env, "BP_IDLE_TIMEOUT_MS", 600_000),
-    hardCapMs: num(env, "BP_HARD_CAP_MS", 3_600_000),
     nodeBin: env.BP_NODE_BIN?.trim() || "node",
     aiCredential: readCredential(env),
   };

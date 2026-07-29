@@ -15,9 +15,20 @@ const permissionOptions = () =>
     requestId: "req_test",
   }) as unknown as Parameters<CanUseTool>[2];
 
+const SITE = {
+  id: "site-1",
+  name: "Example ERP",
+  baseUrl: "https://target.example.com",
+  loginStrategy: "cookie_mint" as const,
+  cookieName: "target-session",
+  secret: "sekret",
+  systemPromptNotes: "Purchase orders live at /purchase-orders.",
+  destructivePatterns: null,
+};
+
 const OPTS = {
   cdpEndpoint: "http://127.0.0.1:1234",
-  jwmUrl: "https://jwm.example.com",
+  site: SITE,
   model: "claude-opus-5",
   env: { CLAUDE_CODE_OAUTH_TOKEN: "t" },
 };
@@ -78,9 +89,25 @@ const assistantToolUse = (name: string, input: Record<string, unknown>) => ({
 
 describe("buildSystemPrompt", () => {
   test("names the target app and forbids leaving it", () => {
-    const prompt = buildSystemPrompt("https://jwm.example.com");
-    expect(prompt).toContain("https://jwm.example.com");
+    const prompt = buildSystemPrompt(SITE);
+    expect(prompt).toContain("https://target.example.com");
+    expect(prompt).toContain("Example ERP");
     expect(prompt.toLowerCase()).toContain("do not navigate");
+  });
+
+  test("includes the site's own notes when it has them", () => {
+    expect(buildSystemPrompt(SITE)).toContain("Purchase orders live at /purchase-orders.");
+  });
+
+  test("omits the notes section entirely when there are none", () => {
+    const prompt = buildSystemPrompt({ ...SITE, systemPromptNotes: null });
+    expect(prompt).not.toContain("About this application");
+  });
+
+  test("no target is hardcoded — the prompt follows the profile", () => {
+    const prompt = buildSystemPrompt({ ...SITE, name: "Other App", baseUrl: "https://other.test" });
+    expect(prompt).toContain("https://other.test");
+    expect(prompt).not.toContain("target.example.com");
   });
 });
 

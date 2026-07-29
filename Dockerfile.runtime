@@ -1,0 +1,33 @@
+# The Playwright image already carries Chromium, its system libraries, and node
+# — which the Playwright MCP server needs, since it cannot run under Bun.
+FROM mcr.microsoft.com/playwright:v1.62.0-noble
+
+# bun's installer needs unzip, which this image does not ship.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /app
+
+# Install from the workspace root so the runtime resolves @browserpilot/core
+# and @browserpilot/db the same way it does in development.
+COPY package.json bun.lock ./
+COPY core/package.json ./core/
+COPY db/package.json ./db/
+COPY runtime/package.json ./runtime/
+COPY web/package.json ./web/
+RUN bun install --frozen-lockfile
+
+COPY core ./core
+COPY db ./db
+COPY runtime ./runtime
+
+ENV BP_PORT=8787
+ENV BP_NODE_BIN=/usr/bin/node
+ENV BP_DOWNLOADS_DIR=/app/downloads
+
+EXPOSE 8787
+CMD ["bun", "run", "runtime/src/server.ts"]

@@ -30,7 +30,8 @@ beforeAll(async () => {
   browser = await launchRobotBrowser({
     targetUrl: `http://127.0.0.1:${server.port}`,
     user: USER,
-    sessionSecret: "shared-with-jwm",
+    sessionSecret: "site-secret",
+    cookieName: "target-session",
     downloadsDir,
   });
 }, 60_000);
