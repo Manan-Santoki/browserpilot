@@ -94,7 +94,14 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         if (!manager.canAccess(session, claims.userId, claims.role)) {
           return json({ error: "Not your session" }, 403);
         }
-        if (srv.upgrade(req, { data: { sessionId, claims } })) {
+        // Declared in the URL rather than in a message, because the first
+        // frame is replayed the moment the socket opens — before any message
+        // from the client could have arrived. A client that asked afterwards
+        // silently missed that frame, which on a still page is the only one
+        // it was going to get.
+        const wantsBase64 = url.searchParams.get("frames") === "base64";
+
+        if (srv.upgrade(req, { data: { sessionId, claims, base64Frames: wantsBase64 } })) {
           return undefined as unknown as Response;
         }
         return json({ error: "Expected a WebSocket upgrade" }, 426);

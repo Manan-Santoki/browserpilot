@@ -47,6 +47,13 @@ export default function SessionScreen() {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+  /**
+   * A phone has no room to show a browser and a conversation at once and do
+   * either well. Tapping the browser gives it the whole screen — which is what
+   * you want when checking what the robot is actually looking at — and tapping
+   * again gives the conversation back.
+   */
+  const [expanded, setExpanded] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
   const logRef = useRef<ScrollView | null>(null);
@@ -66,15 +73,14 @@ export default function SessionScreen() {
         const { url } = await getTicket(String(id));
         if (closed) return;
 
-        socket = new WebSocket(url);
+        // Declared here rather than in a message: the runtime replays the last
+        // frame as the socket opens, and a request sent afterwards would arrive
+        // too late for it.
+        socket = new WebSocket(`${url}&frames=base64`);
         socketRef.current = socket;
 
         socket.onopen = () => {
           setConnected(true);
-          // Binary frames are awkward to turn into something an <Image> will
-          // take here, and the runtime already holds them as base64, so ask
-          // for text before asking for frames at all.
-          socket?.send(JSON.stringify({ type: "frame_encoding", encoding: "base64" }));
           socket?.send(JSON.stringify({ type: "preview", enabled: true }));
         };
         socket.onclose = () => setConnected(false);
@@ -167,8 +173,15 @@ export default function SessionScreen() {
     >
       <View style={{ flex: 1, flexDirection: landscape ? "row" : "column" }}>
         {/* The browser. On a tablet held sideways it takes the left half; on a
-            phone it is a band across the top, sized to the frame's own shape. */}
-        <View style={[styles.preview, landscape ? { flex: 1 } : { aspectRatio: 16 / 10 }]}>
+            phone it is a band across the top, sized to the frame's own shape,
+            unless it has been given the whole screen. */}
+        <Pressable
+          onPress={() => setExpanded((open) => !open)}
+          style={[
+            styles.preview,
+            landscape || expanded ? { flex: 1 } : { aspectRatio: 16 / 10 },
+          ]}
+        >
           {frame ? (
             <Image
               source={{ uri: `data:image/jpeg;base64,${frame}` }}
@@ -182,9 +195,25 @@ export default function SessionScreen() {
               </Text>
             </View>
           )}
-        </View>
 
-        <View style={{ flex: 1 }}>
+          <View style={styles.expandHint}>
+            <Ionicons
+              name={expanded ? "contract-outline" : "expand-outline"}
+              size={16}
+              color={colour.text}
+            />
+          </View>
+        </Pressable>
+
+        {/* Giving the browser the screen hides the conversation, but never an
+            approval waiting for an answer — that is the one thing worth
+            interrupting a look at the page for. */}
+        <View
+          style={[
+            { flex: 1 },
+            expanded && !landscape && !pending && { display: "none" },
+          ]}
+        >
           <View style={styles.statusBar}>
             <StatusLamp status={connected ? status : "interrupted"} live={connected} />
             {!ended ? (
@@ -307,6 +336,14 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
     borderBottomWidth: 1,
     borderBottomColor: colour.border,
+  },
+  expandHint: {
+    position: "absolute",
+    right: space.sm,
+    bottom: space.sm,
+    padding: space.sm,
+    borderRadius: radius.sm,
+    backgroundColor: "#0f1115bb",
   },
   approval: {
     borderTopWidth: 1,

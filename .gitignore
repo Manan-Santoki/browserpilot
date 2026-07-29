@@ -24,3 +24,6 @@ scratch/
 mobile/android/
 mobile/ios/
 mobile/.expo/
+
+# Built app artifacts.
+dist/

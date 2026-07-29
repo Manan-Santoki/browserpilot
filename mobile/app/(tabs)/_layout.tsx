@@ -11,10 +11,11 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: colour.background },
-        headerTintColor: colour.text,
-        headerShadowVisible: false,
-        headerTitleStyle: { fontWeight: "600" },
+        // Each screen writes its own heading, with a line underneath saying
+        // what is going on — how many sessions want you, how many files there
+        // are. A navigator bar above that would repeat the title and drop the
+        // part worth reading.
+        headerShown: false,
         tabBarStyle: {
           backgroundColor: colour.card,
           borderTopColor: colour.border,
