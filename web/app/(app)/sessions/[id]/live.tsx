@@ -174,6 +174,14 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
     wsRef.current?.send(JSON.stringify({ type: "approval", requestId, approved }));
   };
 
+  // Identity-stable, so resizing does not tear down the observer each render.
+  const reportSize = useCallback((cssWidth: number, pixelRatio: number) => {
+    const socket = wsRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "viewport", cssWidth, pixelRatio }));
+    }
+  }, []);
+
   const togglePreview = (checked?: boolean) => {
     const next = checked ?? !previewOn;
     setPreviewOn(next);
@@ -233,6 +241,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             shape, so nothing overflows and nothing is cropped. */}
         <BrowserStream
           ref={streamRef}
+          onDisplaySize={reportSize}
           className="bg-background min-h-0 w-full flex-1 max-lg:aspect-[16/10]"
           placeholder={
             previewOn ? "Waiting for the first frame…" : "Turn on live preview to watch the browser."

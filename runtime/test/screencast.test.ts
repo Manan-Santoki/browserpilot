@@ -48,6 +48,24 @@ afterAll(async () => {
   await rm(downloadsDir, { recursive: true, force: true });
 });
 
+/** Pixel dimensions from a JPEG's start-of-frame marker. */
+function jpegDimensions(base64: string): { w: number; h: number } | undefined {
+  const buf = Buffer.from(base64, "base64");
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) {
+      i++;
+      continue;
+    }
+    const marker = buf[i + 1]!;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+    }
+    i += 2 + buf.readUInt16BE(i + 2);
+  }
+  return undefined;
+}
+
 describe("startScreencast", () => {
   test("delivers JPEG frames while running and stops delivering after stop()", async () => {
     const frames: string[] = [];
@@ -63,22 +81,52 @@ describe("startScreencast", () => {
     expect(frames.length).toBe(countAtStop);
   }, 30_000);
 
-  test("a page that never repaints still produces a steady stream", async () => {
+  test("a page that never repaints is shown once, not streamed repeatedly", async () => {
     // This is the ordinary case — a business page sitting there between the
-    // agent's actions. Chromium emits nothing at all for it, so every frame
-    // here comes from the heartbeat.
+    // agent's actions. Chromium emits nothing at all for it, so the frame has
+    // to be asked for. Asking again and again would send the same picture
+    // every second for as long as anyone watched; a viewer that arrives later
+    // is caught up from the last frame instead.
     const frames: string[] = [];
     const handle = await startScreencast(browser.context, (frame) => frames.push(frame), {
+      settleMs: 150,
       heartbeatMs: 200,
     });
 
-    await Bun.sleep(1400);
+    await Bun.sleep(600);
+    const afterSettling = frames.length;
+    await Bun.sleep(1000);
     await handle.stop();
 
-    // ~7 heartbeats in 1.4s; anything above a couple proves it is not just the
-    // single frame captured at start.
-    expect(frames.length).toBeGreaterThan(3);
+    // Something arrived without the page doing anything.
+    expect(afterSettling).toBeGreaterThan(0);
+    // And it did not keep arriving: a still page costs nothing to watch.
+    expect(frames.length).toBe(afterSettling);
     expect(frames.every((f) => f.startsWith(JPEG))).toBe(true);
+  }, 30_000);
+
+  test("the still frame is sharper than the moving ones", async () => {
+    // Page.startScreencast renders at CSS pixel size whatever the device scale
+    // factor is, which is why the live stream looks soft. The frame taken once
+    // the page settles is captured at the viewer's real pixel density instead.
+    const sizes: Array<{ w: number; h: number }> = [];
+    const handle = await startScreencast(
+      browser.context,
+      (frame) => {
+        const size = jpegDimensions(frame);
+        if (size) sizes.push(size);
+      },
+      { settleMs: 150 },
+    );
+    handle.resize(1200, 2);
+
+    await Bun.sleep(900);
+    await handle.stop();
+
+    const widest = Math.max(...sizes.map((s) => s.w));
+    // The viewport is 800 CSS px wide in this fixture, so anything above it
+    // could only have come from the high-resolution capture.
+    expect(widest).toBeGreaterThan(800);
   }, 30_000);
 
   test("the fps ceiling holds even when the page repaints constantly", async () => {

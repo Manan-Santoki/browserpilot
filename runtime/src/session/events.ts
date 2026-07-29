@@ -39,6 +39,9 @@ export type ClientCommand =
   | { type: "user_msg"; text: string }
   | { type: "approval"; requestId: string; approved: boolean }
   | { type: "preview"; enabled: boolean }
+  // How large the viewer is showing the stream, so the sharp frame is taken at
+  // the resolution it will actually be displayed at and no larger.
+  | { type: "viewport"; cssWidth: number; pixelRatio: number }
   // Only a sign-in session accepts these: the person driving the browser.
   | { type: "input"; event: RemoteInput }
   | { type: "stop" };

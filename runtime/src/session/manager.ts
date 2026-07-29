@@ -45,7 +45,7 @@ export type ScreencastStarter = (
   context: RobotBrowser["context"],
   onFrame: (jpegBase64: string) => void,
   opts?: ScreencastOptions,
-) => Promise<{ stop(): Promise<void> }>;
+) => Promise<{ stop(): Promise<void>; resize(cssWidth: number, pixelRatio: number): void }>;
 
 export type ManagerDeps = {
   launchBrowser: (args: LaunchArgs) => Promise<RobotBrowser>;
@@ -62,28 +62,22 @@ export type ManagerDeps = {
 };
 
 /**
- * A sign-in stream is sent at the browser's own size and a high JPEG quality.
- * The default is tuned for a preview of the robot at work, where a soft frame
- * costs nothing; here a person has to read a form and click a small link.
+ * Signing in is the one time a person is aiming at things themselves, so the
+ * moving stream is worth more here than while watching the robot: a cursor
+ * that lags is a cursor that misses. The still frame is sharp in both cases.
  */
 const LOGIN_SCREENCAST: ScreencastOptions = {
-  quality: 92,
-  maxWidth: 1600,
-  maxHeight: 1600,
-  fps: 15,
+  quality: 80,
+  fps: 20,
+  settleMs: 250,
 };
 
 /**
- * Watching the robot work is now the larger half of the session page rather
- * than a thumbnail beside the chat, so the default 900px was being scaled up
- * and showing it. Still below the sign-in settings: this one runs for the whole
- * life of every session, where that one runs for a minute.
+ * Watching the robot work. The defaults already carry the motion cheaply and
+ * the sharp frame is sized from the viewer's own panel, so there is nothing
+ * left to say here — which is the point.
  */
-const AGENT_SCREENCAST: ScreencastOptions = {
-  quality: 80,
-  maxWidth: 1600,
-  maxHeight: 1600,
-};
+const AGENT_SCREENCAST: ScreencastOptions = {};
 
 export type ManagerConfig = {
   downloadsRoot: string;
@@ -116,7 +110,9 @@ export type Session = {
   scratchProfileDir?: string;
   listeners: Set<(event: RobotEvent) => void>;
   frameListeners: Set<(frame: string) => void>;
-  screencast?: { stop(): Promise<void> };
+  screencast?: { stop(): Promise<void>; resize(cssWidth: number, pixelRatio: number): void };
+  /** Remembered so a restarted stream comes back at the right size. */
+  previewSize?: { cssWidth: number; pixelRatio: number };
   /**
    * The most recent frame, replayed to whoever connects next.
    *
@@ -575,6 +571,14 @@ export class SessionManager {
     }
 
     this.emit(session, { type: "preview_state", enabled });
+  }
+
+  /** Tell the running stream how large the viewer is showing it. */
+  async setPreviewSize(id: string, cssWidth: number, pixelRatio: number): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session) return;
+    session.previewSize = { cssWidth, pixelRatio };
+    session.screencast?.resize(cssWidth, pixelRatio);
   }
 
   /**

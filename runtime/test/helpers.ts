@@ -109,6 +109,8 @@ export type FakeBrowserState = {
   pushFrame?: (frame: string) => void;
   screencastStarts: number;
   screencastStops: number;
+  /** Sizes the console asked the stream to render at. */
+  resizes: Array<{ cssWidth: number; pixelRatio: number }>;
   emit?: (event: RobotEvent) => void;
   /** The runner's route for keeping a file, as the manager wired it. */
   saveFile?: (filename: string, bytes: Uint8Array) => Promise<void>;
@@ -155,6 +157,7 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
   const state: FakeBrowserState = {
     screencastStarts: 0,
     screencastStops: 0,
+    resizes: [],
     sent: [],
     closed: { browser: 0, agent: 0, input: 0 },
     landingUrl: "https://target.test/dashboard",
@@ -213,6 +216,9 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
       return {
         stop: async () => {
           state.screencastStops++;
+        },
+        resize: (cssWidth, pixelRatio) => {
+          state.resizes.push({ cssWidth, pixelRatio });
         },
       };
     },

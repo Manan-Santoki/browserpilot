@@ -29,6 +29,13 @@ export type ServerOptions = {
   downloadsRoot: string;
 };
 
+/**
+ * How much unsent frame data may sit in a socket before frames start being
+ * dropped. About one large frame: enough to ride out a hiccup, not enough to
+ * build a delay anyone would notice.
+ */
+const FRAME_BACKLOG_BYTES = 1_500_000;
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -322,6 +329,11 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         // Preview frames ride the same socket as binary messages; clients tell
         // the two lanes apart by frame type, not by an envelope.
         ws.data.unsubscribeFrames = manager.subscribeFrames(ws.data.sessionId, (frame) => {
+          // Drop rather than queue. A frame is only worth sending while it is
+          // still what the browser looks like; behind a slow connection a queue
+          // turns into a growing delay, and the viewer watches the past — which
+          // reads as the stream being broken rather than merely slower.
+          if (ws.getBufferedAmount() > FRAME_BACKLOG_BYTES) return;
           ws.send(Buffer.from(frame, "base64"));
         });
       },
@@ -348,6 +360,9 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             break;
           case "preview":
             void manager.setPreview(id, command.enabled);
+            break;
+          case "viewport":
+            void manager.setPreviewSize(id, command.cssWidth, command.pixelRatio);
             break;
           case "input":
             // Ownership, not canAccess: an admin watching a colleague's

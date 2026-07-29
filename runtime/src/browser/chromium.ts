@@ -89,6 +89,10 @@ export async function launchRobotBrowser(opts: LaunchOptions): Promise<RobotBrow
     acceptDownloads: true,
     downloadsPath: opts.downloadsDir,
     viewport: { width: 1600, height: 1000 },
+    // Renders text and rules at twice the density, which is what makes the
+    // settled frame sharp. Screencast frames stay at CSS size regardless, so
+    // this costs nothing while the page is moving.
+    deviceScaleFactor: 2,
     args: [`--remote-debugging-port=${port}`, "--remote-allow-origins=*"],
   });
 

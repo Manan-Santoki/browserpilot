@@ -32,6 +32,13 @@ export function RemoteBrowser({ sessionId, onReady }: Props) {
   const streamRef = useRef<BrowserStreamHandle | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
 
+  const reportSize = useCallback((cssWidth: number, pixelRatio: number) => {
+    const socket = wsRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "viewport", cssWidth, pixelRatio }));
+    }
+  }, []);
+
   const send = useCallback((event: unknown) => {
     const socket = wsRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
@@ -182,6 +189,7 @@ export function RemoteBrowser({ sessionId, onReady }: Props) {
       >
         <BrowserStream
           ref={streamRef}
+          onDisplaySize={reportSize}
           className="pointer-events-none h-full w-full"
           placeholder={error ?? (connected ? "Waiting for the page…" : "Opening a browser…")}
         />

@@ -2,27 +2,42 @@ import type { BrowserContext, CDPSession, Page } from "playwright";
 
 export type ScreencastHandle = {
   stop(): Promise<void>;
+  /** Ask for frames sized for the viewer's panel. Safe to call repeatedly. */
+  resize(cssWidth: number, pixelRatio: number): void;
 };
 
 export type ScreencastOptions = {
+  /** Quality of the frames sent while the page is moving. */
   quality?: number;
+  /** Quality of the sharp frame sent once it settles. */
+  settledQuality?: number;
   maxWidth?: number;
   maxHeight?: number;
   /** Ceiling on frames forwarded per second, whatever Chromium produces. */
   fps?: number;
+  /** Still for this long, and the sharp frame is taken. */
+  settleMs?: number;
   /** Capture a frame anyway once the watched page has been still this long. */
   heartbeatMs?: number;
   /** How quiet the watched tab must go before another may take the view. */
   switchAfterMs?: number;
+  /** Upper bound on the sharp frame, as a multiple of CSS pixels. */
+  maxScale?: number;
+  /** How long a capture's own repaint is ignored for. */
+  captureEchoMs?: number;
 };
 
 const DEFAULTS = {
-  quality: 60,
-  maxWidth: 900,
-  maxHeight: 1600,
+  quality: 70,
+  settledQuality: 90,
+  maxWidth: 1920,
+  maxHeight: 1920,
   fps: 12,
-  heartbeatMs: 1000,
-  switchAfterMs: 400,
+  settleMs: 350,
+  heartbeatMs: 1500,
+  switchAfterMs: 900,
+  maxScale: 2,
+  captureEchoMs: 250,
 };
 
 type Metrics = {
@@ -37,13 +52,21 @@ type Metrics = {
  * still photograph of an abandoned tab from the moment the agent moves on —
  * which is indistinguishable, to whoever is watching, from the robot freezing.
  *
- * Two things stand between Chromium and a stream that looks live:
+ * Chromium gives two ways to see a page, and neither is sufficient alone:
  *
- *   - Frames only exist when the page repaints. A page merely sitting there
- *     produces none at all, so the heartbeat captures one on demand.
- *   - A repainting page produces far more than anyone needs to see. The fps
- *     ceiling coalesces them, always keeping the newest, so motion stays smooth
- *     without paying for thirty frames a second of it.
+ *   - Page.startScreencast is cheap and continuous, but always renders at CSS
+ *     pixel size. maxWidth cannot raise it; a 1600px viewport yields a 1600px
+ *     frame however high the device scale factor is. On any modern display that
+ *     is upscaled to fit the panel, which is exactly the softness people see.
+ *   - Page.captureScreenshot with clip.scale renders at whatever multiple you
+ *     ask for, and is sharp — but it is a round trip per frame, far too slow to
+ *     drive a live stream.
+ *
+ * So each is used for what it is good at. While the page is moving, the cheap
+ * stream carries the motion, because nobody reads a page mid-scroll. The moment
+ * it settles — which is when someone actually looks at it — one sharp frame is
+ * taken at full device resolution and replaces it. Reading is crisp, motion is
+ * smooth, and neither pays for the other.
  */
 export async function startScreencast(
   context: BrowserContext,
@@ -59,10 +82,27 @@ export async function startScreencast(
   /** The tab whose frames reach the viewer, and when it last painted. */
   let watched: Page | undefined;
   let watchedPaintedAt = 0;
+  /** Consecutive frames from a tab that is not the watched one. */
+  let challenger: { page: Page; frames: number } | undefined;
 
   let sentAt = 0;
   let pending: string | undefined;
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Set once the sharp frame for the current stillness has been sent. */
+  let settled = false;
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Taking the sharp frame forces Chromium to commit a new one, which the
+   * screencast then reports as movement. Left alone that soft frame paints
+   * straight over the sharp one and starts another settle — a visible flicker
+   * on a page that is not changing at all. Frames are ignored briefly after a
+   * capture for that reason.
+   */
+  let ignoreFramesUntil = 0;
+
+  /** What the viewer's panel can actually show, in device pixels. */
+  let wantedPixels = cfg.maxWidth;
 
   const now = () => Date.now();
 
@@ -73,19 +113,84 @@ export async function startScreencast(
   }
 
   /**
+   * Take the sharp frame, once the page has stopped changing.
+   *
+   * Scale is chosen from what the viewer can display: sending three times the
+   * pixels of the panel it lands in costs bandwidth and buys nothing.
+   */
+  async function sendSettled(page: Page): Promise<void> {
+    if (stopped || settled) return;
+    const client = attached.get(page);
+    if (!client) return;
+
+    try {
+      const { cssVisualViewport: view } = (await client.send("Page.getLayoutMetrics")) as Metrics;
+      if (view.clientWidth === 0 || view.clientHeight === 0) return;
+
+      const scale = Math.min(cfg.maxScale, Math.max(1, wantedPixels / view.clientWidth));
+      const shot = (await client.send("Page.captureScreenshot", {
+        format: "jpeg",
+        quality: cfg.settledQuality,
+        captureBeyondViewport: false,
+        clip: {
+          x: view.pageX,
+          y: view.pageY,
+          width: view.clientWidth,
+          height: view.clientHeight,
+          scale,
+        },
+      })) as { data: string };
+
+      // A repaint may have landed while this was in flight, in which case the
+      // page is moving again and this frame is already history.
+      if (!stopped && !settled && watched === page) {
+        settled = true;
+        send(shot.data);
+        ignoreFramesUntil = now() + cfg.captureEchoMs;
+      }
+    } catch {
+      // Navigated or closed under us; the next stillness tries again.
+    }
+  }
+
+  function scheduleSettle(page: Page): void {
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined;
+      void sendSettled(page);
+    }, cfg.settleMs);
+  }
+
+  /**
    * Take a frame from one of the tabs and decide whether the viewer sees it.
    *
-   * Whichever tab is painting owns the view — that is where the work is — but
-   * only once the tab we are watching has gone quiet. Without that pause, two
-   * live tabs would trade the panel back and forth on every frame and the
-   * result would be unwatchable.
+   * Whichever tab is painting owns the view — that is where the work is — but a
+   * single frame is not enough to claim it. Background tabs repaint for reasons
+   * nobody is watching for: an advert, a spinner, a favicon. Requiring a run of
+   * frames, and a real pause from the incumbent, keeps the view where the work
+   * is instead of letting it flit between tabs.
    */
   function offer(page: Page, frame: string): void {
     if (stopped) return;
+    if (now() < ignoreFramesUntil) return;
 
-    if (watched && watched !== page && now() - watchedPaintedAt <= cfg.switchAfterMs) return;
+    if (watched && watched !== page) {
+      if (now() - watchedPaintedAt <= cfg.switchAfterMs) return;
+
+      // The incumbent has gone quiet; make the challenger prove it is busy.
+      challenger =
+        challenger?.page === page ? { page, frames: challenger.frames + 1 } : { page, frames: 1 };
+      if (challenger.frames < 3) return;
+    }
+
+    challenger = undefined;
     watched = page;
     watchedPaintedAt = now();
+
+    // The page is moving, so any sharp frame is stale and a new stillness has
+    // not happened yet.
+    settled = false;
+    scheduleSettle(page);
 
     const wait = minGapMs - (now() - sentAt);
     if (wait <= 0) {
@@ -101,43 +206,6 @@ export async function startScreencast(
         flushTimer = undefined;
         if (pending !== undefined) send(pending);
       }, wait);
-    }
-  }
-
-  /**
-   * A frame captured on demand, for a page that simply is not repainting.
-   *
-   * Chromium scales screencast frames to maxWidth/maxHeight but leaves a plain
-   * captureScreenshot at full size, so this clips to the visible viewport and
-   * applies the same factor. Otherwise every heartbeat would arrive at a
-   * different resolution from the frames around it.
-   */
-  async function capture(page: Page): Promise<string | undefined> {
-    const client = attached.get(page);
-    if (!client) return undefined;
-    try {
-      const { cssVisualViewport: view } = (await client.send("Page.getLayoutMetrics")) as Metrics;
-      const scale = Math.min(
-        1,
-        cfg.maxWidth / view.clientWidth,
-        cfg.maxHeight / view.clientHeight,
-      );
-      const shot = (await client.send("Page.captureScreenshot", {
-        format: "jpeg",
-        quality: cfg.quality,
-        captureBeyondViewport: false,
-        clip: {
-          x: view.pageX,
-          y: view.pageY,
-          width: view.clientWidth,
-          height: view.clientHeight,
-          scale,
-        },
-      })) as { data: string };
-      return shot.data;
-    } catch {
-      // The page may have navigated or closed under us; the next tick retries.
-      return undefined;
     }
   }
 
@@ -181,10 +249,14 @@ export async function startScreencast(
       return;
     }
 
-    // A new tab is where the agent is about to work, and a tab that opens onto
-    // something static would otherwise announce itself with nothing at all.
-    const first = await capture(page);
-    if (first) offer(page, first);
+    // A new tab is where the agent is about to work, so it takes the view
+    // outright: the challenger rule below exists for tabs that were already
+    // open and merely twitched, not for one that just appeared.
+    watched = page;
+    watchedPaintedAt = now();
+    challenger = undefined;
+    settled = false;
+    scheduleSettle(page);
   }
 
   async function detach(page: Page): Promise<void> {
@@ -197,6 +269,16 @@ export async function startScreencast(
       // waiting out a switch delay against a page that no longer exists.
       watched = undefined;
       watchedPaintedAt = 0;
+      challenger = undefined;
+      settled = false;
+
+      const survivor = attached.keys().next().value;
+      if (survivor) {
+        watched = survivor;
+        // It may be perfectly still, and a still page paints nothing at all —
+        // so ask it for a frame rather than wait for one.
+        scheduleSettle(survivor);
+      }
     }
 
     try {
@@ -214,26 +296,40 @@ export async function startScreencast(
   // there is nothing to distinguish them.
   for (const page of context.pages()) await attach(page);
 
+  // For a page that never paints at all — one that loaded before anyone was
+  // watching, and has nothing to say since.
   const heartbeat = setInterval(
     () => {
-      if (stopped || now() - sentAt < cfg.heartbeatMs) return;
+      if (stopped || settled || now() - sentAt < cfg.heartbeatMs) return;
       const page = watched ?? attached.keys().next().value;
-      if (!page) return;
-      void capture(page).then((frame) => {
-        // A real repaint may have arrived while the capture was in flight.
-        if (frame && !stopped && now() - sentAt >= cfg.heartbeatMs) send(frame);
-      });
+      if (page) void sendSettled(page);
     },
-    Math.max(100, Math.round(cfg.heartbeatMs / 2)),
+    Math.max(200, Math.round(cfg.heartbeatMs / 2)),
   );
 
   return {
+    resize(cssWidth: number, pixelRatio: number) {
+      const wanted = Math.round(cssWidth * pixelRatio);
+      if (!Number.isFinite(wanted) || wanted <= 0) return;
+
+      const clamped = Math.min(Math.max(wanted, 640), cfg.maxWidth * cfg.maxScale);
+      if (clamped === wantedPixels) return;
+      wantedPixels = clamped;
+
+      // The next stillness re-takes the sharp frame at the new size; there is
+      // no need to disturb the running stream to do it.
+      settled = false;
+      if (watched) scheduleSettle(watched);
+    },
+
     async stop() {
       stopped = true;
       context.off("page", onPage);
       clearInterval(heartbeat);
       if (flushTimer) clearTimeout(flushTimer);
+      if (settleTimer) clearTimeout(settleTimer);
       flushTimer = undefined;
+      settleTimer = undefined;
       await Promise.all([...attached.keys()].map((page) => detach(page)));
     },
   };

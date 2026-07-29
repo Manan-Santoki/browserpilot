@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useImperativeHandle, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export type BrowserStreamHandle = {
@@ -10,6 +10,12 @@ export type BrowserStreamHandle = {
 
 type Props = {
   ref?: React.Ref<BrowserStreamHandle>;
+  /**
+   * Called with the size this is being displayed at, in real device pixels.
+   * The runtime cannot know it, and rendering the page larger than the panel
+   * that shows it is bandwidth spent on detail nobody can see.
+   */
+  onDisplaySize?: (cssWidth: number, pixelRatio: number) => void;
   /** Shown until the first frame arrives. */
   placeholder?: React.ReactNode;
   /** Applied to the canvas, which keeps the frame's aspect ratio on its own. */
@@ -29,8 +35,15 @@ type Props = {
  * Decoding is asynchronous and the stream does not wait, so only the newest
  * frame is kept: anything older is already wrong by the time it would appear.
  */
-export function BrowserStream({ ref, placeholder, canvasClassName, className }: Props) {
+export function BrowserStream({
+  ref,
+  placeholder,
+  canvasClassName,
+  className,
+  onDisplaySize,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
 
   const queued = useRef<Blob | null>(null);
@@ -79,8 +92,28 @@ export function BrowserStream({ ref, placeholder, canvasClassName, className }: 
 
   useImperativeHandle(ref, () => ({ push }), [push]);
 
+  // Report the panel's size, and keep reporting as the window changes. The
+  // runtime only acts on a real change, so a resize drag costs nothing.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !onDisplaySize) return;
+
+    const report = () => {
+      const width = host.clientWidth;
+      if (width > 0) onDisplaySize(width, window.devicePixelRatio || 1);
+    };
+
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [onDisplaySize]);
+
   return (
-    <div className={cn("relative flex items-center justify-center overflow-hidden", className)}>
+    <div
+      ref={hostRef}
+      className={cn("relative flex items-center justify-center overflow-hidden", className)}
+    >
       <canvas
         ref={canvasRef}
         aria-label="Live browser"

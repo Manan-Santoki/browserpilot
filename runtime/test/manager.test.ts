@@ -136,7 +136,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
         },
       };
     },
-    startScreencast: async () => ({ stop: async () => {} }),
+    startScreencast: async () => ({ stop: async () => {}, resize: () => {} }),
     ...overrides,
   };
 
