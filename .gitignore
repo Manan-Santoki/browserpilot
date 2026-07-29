@@ -19,3 +19,8 @@ next-env.d.ts
 profiles/
 scratch/
 .data/
+
+# Generated native projects and build output for the phone app.
+mobile/android/
+mobile/ios/
+mobile/.expo/
