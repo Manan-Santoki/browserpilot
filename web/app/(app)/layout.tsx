@@ -31,7 +31,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </nav>
 
           <div className="ml-auto flex items-center gap-3 text-sm">
-            <span className="text-neutral-500 dark:text-neutral-400">{user.name}</span>
+            <Link
+              href="/account"
+              className="text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
+            >
+              {user.name}
+            </Link>
             <form action={logout}>
               <button
                 type="submit"
