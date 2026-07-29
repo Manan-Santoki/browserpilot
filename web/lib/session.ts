@@ -8,6 +8,17 @@ import { db } from "./db";
 export const SESSION_COOKIE = "bp_session";
 const SESSION_TTL_DAYS = 14;
 
+/**
+ * Whether to mark the session cookie `secure`.
+ *
+ * Derived from the console's own URL rather than NODE_ENV: a production build
+ * served over plain HTTP would set a secure cookie the browser silently drops,
+ * and login would fail with nothing to see in the logs.
+ */
+function useSecureCookie(): boolean {
+  return (process.env.BP_WEB_URL ?? "").startsWith("https://");
+}
+
 export type CurrentUser = {
   id: string;
   email: string;
@@ -36,7 +47,7 @@ export async function createSession(userId: string): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: useSecureCookie(),
     sameSite: "lax",
     path: "/",
     expires: expiresAt,
