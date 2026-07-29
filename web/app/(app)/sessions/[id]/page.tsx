@@ -9,6 +9,7 @@ import { loadTranscript } from "@/lib/transcript";
 import { restartBrowser, stopSession } from "../actions";
 import { LiveSession } from "./live";
 import { SessionFiles } from "./files";
+import { TranscriptView } from "./transcript-view";
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -85,13 +86,16 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       <SessionFiles sessionId={session.id} />
 
       {finished ? (
-        <div className="rounded-lg border border-neutral-200 px-6 py-10 text-center dark:border-neutral-800">
-          <p className="text-sm text-neutral-600 dark:text-neutral-300">
-            This session has ended{session.endedReason ? `: ${session.endedReason}` : "."}
-          </p>
-          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            Its browser is gone, so there is nothing left to watch or talk to.
-          </p>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-neutral-200 px-4 py-3 text-sm dark:border-neutral-800">
+            <span className="text-neutral-600 dark:text-neutral-300">
+              This session has ended{session.endedReason ? `: ${session.endedReason}` : "."}
+            </span>{" "}
+            <span className="text-neutral-500 dark:text-neutral-400">
+              Its browser is gone, but the conversation and files below are kept.
+            </span>
+          </div>
+          <TranscriptView items={transcript} />
         </div>
       ) : (
         <LiveSession
