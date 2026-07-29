@@ -7,7 +7,9 @@
     "scheme": "browserpilot",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.msantoki.browserpilot",
@@ -17,8 +19,9 @@
     },
     "android": {
       "package": "com.msantoki.browserpilot",
-      "adaptiveIcon": { "backgroundColor": "#0f1115" },
-      "edgeToEdgeEnabled": true
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1115"
+      }
     },
     "plugins": [
       "expo-router",
@@ -30,6 +33,8 @@
         }
       ]
     ],
-    "experiments": { "typedRoutes": true }
+    "experiments": {
+      "typedRoutes": true
+    }
   }
 }

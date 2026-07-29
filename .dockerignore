@@ -10,3 +10,6 @@ downloads
 !.env.example
 docs
 *.log
+
+# The phone app is in neither service image.
+mobile

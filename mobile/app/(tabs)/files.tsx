@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
-import { Linking, RefreshControl, Text, View } from "react-native";
+import { RefreshControl, Text, View } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { consoleUrl, getFiles, sessionToken, type FileGroup } from "../../lib/api";
@@ -10,8 +12,12 @@ import { Card, Empty, Heading, Loading, Mono, Notice, Screen } from "../../compo
  * Everything the robot has downloaded, under the session that fetched it.
  *
  * Opening one hands it to the phone's own viewer rather than rendering it
- * here: a phone already knows how to show a PDF, and the session token travels
- * in the URL because an external viewer cannot carry a header.
+ * here: a phone already knows how to show a PDF better than this app would.
+ *
+ * The file is fetched with the session token in a header and written to the
+ * app's own storage first. Handing the viewer a URL instead would mean putting
+ * the token in it — where it would sit in logs and history — because an
+ * external viewer cannot carry a header.
  */
 export default function FilesTab() {
   const [groups, setGroups] = useState<FileGroup[] | null>(null);
@@ -34,9 +40,31 @@ export default function FilesTab() {
     }, [load]),
   );
 
-  const open = async (url: string) => {
-    const [base, token] = await Promise.all([consoleUrl(), sessionToken()]);
-    await Linking.openURL(`${base}${url}?token=${encodeURIComponent(token)}`);
+  const [opening, setOpening] = useState<string | null>(null);
+
+  const open = async (url: string, filename: string) => {
+    if (opening) return;
+    setOpening(filename);
+    setError(null);
+    try {
+      const [base, token] = await Promise.all([consoleUrl(), sessionToken()]);
+      const target = `${FileSystem.cacheDirectory}${encodeURIComponent(filename)}`;
+
+      const result = await FileSystem.downloadAsync(`${base}${url}?download=1`, target, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (result.status !== 200) throw new Error("That file could not be fetched.");
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(result.uri);
+      } else {
+        setError("This device has nothing that can open that file.");
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setOpening(null);
+    }
   };
 
   if (!groups && !error) return <Loading label="Fetching files…" />;
@@ -67,7 +95,7 @@ export default function FilesTab() {
           {group.files.map((file) => (
             <Text
               key={file.filename}
-              onPress={() => void open(file.url)}
+              onPress={() => void open(file.url, file.filename)}
               style={{
                 paddingHorizontal: space.md,
                 paddingVertical: space.md,
@@ -77,7 +105,13 @@ export default function FilesTab() {
               }}
               numberOfLines={1}
             >
-              <Ionicons name="download-outline" size={14} color={colour.textMuted} />  {file.filename}
+              <Ionicons
+                name={opening === file.filename ? "hourglass-outline" : "download-outline"}
+                size={14}
+                color={colour.textMuted}
+              />
+              {"  "}
+              {file.filename}
             </Text>
           ))}
         </Card>

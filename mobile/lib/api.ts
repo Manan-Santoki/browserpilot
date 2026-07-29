@@ -15,7 +15,15 @@ const DEVICE_TOKEN_KEY = "browserpilot.deviceToken";
 const SESSION_TOKEN_KEY = "browserpilot.sessionToken";
 const CONSOLE_URL_KEY = "browserpilot.consoleUrl";
 
-export const DEFAULT_CONSOLE_URL = "https://browserpilot.msantoki.com";
+/**
+ * Where the app looks unless it has been told otherwise.
+ *
+ * EXPO_PUBLIC_CONSOLE_URL is inlined at build time, which is how a development
+ * build is pointed at a console running on the machine that built it. A release
+ * build has no such variable and uses the hosted one.
+ */
+export const DEFAULT_CONSOLE_URL =
+  process.env.EXPO_PUBLIC_CONSOLE_URL ?? "https://browserpilot.msantoki.com";
 
 /**
  * SecureStore is not implemented on web, where Expo runs during development.

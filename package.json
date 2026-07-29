@@ -6,8 +6,7 @@
     "core",
     "db",
     "runtime",
-    "web",
-    "mobile"
+    "web"
   ],
   "scripts": {
     "dev:runtime": "cd runtime && bun run dev",
