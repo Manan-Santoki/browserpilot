@@ -5,13 +5,14 @@ import { Store } from "../src/store";
 import type { ManagerDeps } from "../src/session/manager";
 import type { RobotEvent } from "../src/session/events";
 import type { RobotBrowser } from "../src/browser/chromium";
+import { withTestSettings } from "./support/settings";
 
 export const TEST_DATABASE_URL =
   process.env.DATABASE_URL ?? "postgresql://browserpilot:devpassword@127.0.0.1:55432/browserpilot";
 export const TEST_MASTER_KEY = "k".repeat(44);
 
 export const db = createDatabase(TEST_DATABASE_URL, { max: 3 });
-export const store = new Store(TEST_DATABASE_URL, TEST_MASTER_KEY);
+export const store = withTestSettings(new Store(TEST_DATABASE_URL, TEST_MASTER_KEY));
 
 export type Fixtures = {
   userId: string;

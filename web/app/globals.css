@@ -1,26 +1,177 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-running: var(--running);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --background: #f7f8fa;
+  --foreground: #14171d;
+  --card: #ffffff;
+  --card-foreground: #14171d;
+  --popover: #ffffff;
+  --popover-foreground: #14171d;
+  --primary: #1b1f27;
+  --primary-foreground: #f7f8fa;
+  --secondary: #eceef2;
+  --secondary-foreground: #1b1f27;
+  --muted: #eceef2;
+  --muted-foreground: #5c6472;
+  --accent: #eceef2;
+  --accent-foreground: #1b1f27;
+  --destructive: #c2410c;
+  --border: #dfe3ea;
+  --input: #dfe3ea;
+  --ring: #b26a00;
+  --signal: #b26a00;
+  --signal-foreground: #ffffff;
+  --running: #1a7f4b;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: #0f1115;
+  --foreground: #e6e8ec;
+  --card: #161a21;
+  --card-foreground: #e6e8ec;
+  --popover: #161a21;
+  --popover-foreground: #e6e8ec;
+  --primary: #e6e8ec;
+  --primary-foreground: #0f1115;
+  --secondary: #1e232c;
+  --secondary-foreground: #e6e8ec;
+  --muted: #1e232c;
+  --muted-foreground: #8a93a3;
+  --accent: #1e232c;
+  --accent-foreground: #e6e8ec;
+  --destructive: #f26d6d;
+  --border: #232935;
+  --input: #262c38;
+  --ring: #e8a33d;
+  --signal: #e8a33d;
+  --signal-foreground: #0f1115;
+  --running: #5fd08a;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: #12151b;
+  --sidebar-foreground: #e6e8ec;
+  --sidebar-primary: #e8a33d;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+/**
+ * Status lamps.
+ *
+ * Only "waiting for you" and "working" draw attention, and only the working
+ * lamp moves. A still console means nothing needs you — that is the reading
+ * people want at a glance, so stillness has to mean something.
+ */
+@layer components {
+  .lamp {
+    @apply inline-block size-2 shrink-0 rounded-full;
+  }
+  .lamp-working {
+    background: var(--running);
+    animation: lamp-pulse 1.8s ease-in-out infinite;
+  }
+  .lamp-waiting {
+    background: var(--signal);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--signal) 22%, transparent);
+  }
+  .lamp-idle {
+    background: var(--muted-foreground);
+  }
+  .lamp-off {
+    background: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes lamp-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--running) 45%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--running) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lamp-working { animation: none; }
 }

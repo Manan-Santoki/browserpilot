@@ -1,6 +1,21 @@
 import { requireUser } from "@/lib/auth";
 import { setLanguage } from "./actions";
 import { PasswordForm } from "./password-form";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const LANGUAGES = [
+  { value: "en", label: "English" },
+  { value: "hi", label: "हिन्दी" },
+  { value: "gu", label: "ગુજરાતી" },
+];
 
 export default async function AccountPage() {
   const user = await requireUser();
@@ -9,41 +24,51 @@ export default async function AccountPage() {
     <div className="max-w-lg space-y-10">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Account</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           {user.name} · {user.email} · {user.role === "ADMIN" ? "administrator" : "user"}
         </p>
       </div>
 
-      <section>
-        <h2 className="text-base font-medium">Change password</h2>
-        <div className="mt-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Change password</CardTitle>
+        </CardHeader>
+        <CardContent>
           <PasswordForm />
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
-      <section>
-        <h2 className="text-base font-medium">Speech language</h2>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-          The default for push-to-talk. You can still switch it per recording.
-        </p>
-        <form action={setLanguage} className="mt-3 flex items-center gap-2">
-          <select
-            name="language"
-            defaultValue={user.preferredLanguage}
-            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
-          >
-            <option value="en">English</option>
-            <option value="hi">हिन्दी</option>
-            <option value="gu">ગુજરાતી</option>
-          </select>
-          <button
-            type="submit"
-            className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-900"
-          >
-            Save
-          </button>
-        </form>
-      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Speech language</CardTitle>
+          <CardDescription>
+            The default for push-to-talk. You can still switch it per recording.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={setLanguage} className="flex items-center gap-2">
+            <Select
+              name="language"
+              defaultValue={user.preferredLanguage}
+              items={LANGUAGES}
+            >
+              <SelectTrigger className="w-[160px]" aria-label="Speech language">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGES.map((l) => (
+                  <SelectItem key={l.value} value={l.value}>
+                    {l.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="submit" variant="outline">
+              Save
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

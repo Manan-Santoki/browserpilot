@@ -13,7 +13,8 @@ export async function startSession(_prev: StartState, formData: FormData): Promi
 
   const siteProfileId = String(formData.get("siteProfileId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
-  const model = String(formData.get("model") ?? "").trim();
+  const chosen = String(formData.get("model") ?? "").trim();
+  const model = chosen === "default" ? "" : chosen;
   if (!siteProfileId) return { error: "Choose a site first." };
 
   const result = await startRuntimeSession(

@@ -1,12 +1,13 @@
 "use client";
 
 import { useActionState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { saveSettings, type AdminState } from "../actions";
 
 const initial: AdminState = {};
 
-const field =
-  "w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900";
 
 export function SettingsForm({
   current,
@@ -48,52 +49,46 @@ export function SettingsForm({
     <form action={action} className="space-y-5">
       {rows.map((row) => (
         <div key={row.key}>
-          <label htmlFor={row.key} className="mb-1.5 block text-sm font-medium">
+          <Label htmlFor={row.key} >
             {row.label}
-          </label>
-          <input
+          </Label>
+          <Input
             id={row.key}
             name={row.key}
             type="number"
             min={1}
             defaultValue={current[row.key] as number}
-            className={field}
           />
-          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{row.hint}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{row.hint}</p>
         </div>
       ))}
 
-      <div>
-        <label htmlFor="defaultModel" className="mb-1.5 block text-sm font-medium">
+      <div className="space-y-2">
+        <Label htmlFor="defaultModel">
           Model
-        </label>
-        <input
+        </Label>
+        <Input
           id="defaultModel"
           name="defaultModel"
           defaultValue={current.defaultModel}
-          className={field}
         />
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-xs text-muted-foreground">
           Applies to sessions started from now on; running sessions keep the model they began with.
         </p>
       </div>
 
       {state.error ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-destructive">
           {state.error}
         </p>
       ) : null}
       {state.success ? (
-        <p className="text-sm text-green-700 dark:text-green-400">{state.success}</p>
+        <p className="text-sm text-running">{state.success}</p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-      >
+      <Button type="submit" disabled={pending}>
         {pending ? "Saving…" : "Save limits"}
-      </button>
+      </Button>
     </form>
   );
 }

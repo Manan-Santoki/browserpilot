@@ -3,15 +3,26 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { robotSessions, siteAccounts, siteProfiles } from "@browserpilot/db";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { StatusLabel } from "@/components/status-lamp";
 import { StartSessionForm } from "./start-form";
 import { stopSession } from "./sessions/actions";
+import { ConfirmAction } from "@/components/confirm-action";
 
 const LIVE = ["starting", "idle", "working", "awaiting_approval"] as const;
+
+function elapsed(from: Date): string {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(from).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
 
 export default async function SessionsPage() {
   const user = await requireUser();
   const isAdmin = user.role === "ADMIN";
-
   const mine = isAdmin ? undefined : eq(robotSessions.userId, user.id);
 
   const live = await db()
@@ -24,7 +35,11 @@ export default async function SessionsPage() {
     })
     .from(robotSessions)
     .leftJoin(siteProfiles, eq(siteProfiles.id, robotSessions.siteProfileId))
-    .where(mine ? and(inArray(robotSessions.status, [...LIVE]), mine) : inArray(robotSessions.status, [...LIVE]))
+    .where(
+      mine
+        ? and(inArray(robotSessions.status, [...LIVE]), mine)
+        : inArray(robotSessions.status, [...LIVE]),
+    )
     .orderBy(desc(robotSessions.startedAt));
 
   const recent = await db()
@@ -33,16 +48,14 @@ export default async function SessionsPage() {
       status: robotSessions.status,
       title: robotSessions.title,
       startedAt: robotSessions.startedAt,
-      endedReason: robotSessions.endedReason,
       siteName: siteProfiles.name,
     })
     .from(robotSessions)
     .leftJoin(siteProfiles, eq(siteProfiles.id, robotSessions.siteProfileId))
     .where(mine)
     .orderBy(desc(robotSessions.startedAt))
-    .limit(15);
+    .limit(12);
 
-  // Only sites this person actually has an identity on can be started.
   const startable = await db()
     .select({ id: siteProfiles.id, name: siteProfiles.name })
     .from(siteProfiles)
@@ -53,15 +66,26 @@ export default async function SessionsPage() {
     .where(eq(siteProfiles.isActive, true))
     .orderBy(siteProfiles.name);
 
+  const needsYou = live.filter((s) => s.status === "awaiting_approval").length;
+
   return (
-    <div className="space-y-10">
-      <div className="flex flex-wrap items-start justify-between gap-6">
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Sessions</h1>
-          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            {live.length === 0
-              ? "No browsers running."
-              : `${live.length} browser${live.length === 1 ? "" : "s"} running${isAdmin ? " across all users" : ""}.`}
+          <p className="text-muted-foreground mt-1 text-sm">
+            {live.length === 0 ? (
+              "Nothing running."
+            ) : needsYou > 0 ? (
+              <>
+                <span className="text-signal">
+                  {needsYou} waiting for you
+                </span>{" "}
+                · {live.length} running{isAdmin ? " across all users" : ""}.
+              </>
+            ) : (
+              `${live.length} running${isAdmin ? " across all users" : ""}.`
+            )}
           </p>
         </div>
 
@@ -69,85 +93,89 @@ export default async function SessionsPage() {
       </div>
 
       {live.length > 0 ? (
-        <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {live.map((session) => (
-            <li
-              key={session.id}
-              className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${
-                    session.status === "awaiting_approval"
-                      ? "bg-amber-500"
-                      : session.status === "working"
-                        ? "animate-pulse bg-green-500"
-                        : "bg-neutral-400"
-                  }`}
-                />
-                <span className="text-sm text-neutral-500 dark:text-neutral-400">
-                  {session.status === "awaiting_approval" ? "waiting for you" : session.status}
-                </span>
-              </div>
+            <li key={session.id}>
+              <Card
+                className={
+                  session.status === "awaiting_approval" ? "border-signal/40 py-0" : "py-0"
+                }
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <StatusLabel status={session.status} />
+                    <span className="text-muted-foreground tabular font-mono text-xs">
+                      {elapsed(session.startedAt)}
+                    </span>
+                  </div>
 
-              <p className="mt-2 truncate font-medium">
-                {session.title ?? session.siteName ?? "Session"}
-              </p>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                {session.siteName} · {new Date(session.startedAt).toLocaleTimeString()}
-              </p>
+                  <p className="mt-3 truncate font-medium">
+                    {session.title ?? session.siteName ?? "Session"}
+                  </p>
+                  <p className="text-muted-foreground truncate font-mono text-xs">
+                    {session.siteName ?? "—"}
+                  </p>
 
-              <div className="mt-4 flex items-center gap-3">
-                <Link
-                  href={`/sessions/${session.id}`}
-                  className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
-                >
-                  Open
-                </Link>
-                <form action={stopSession}>
-                  <input type="hidden" name="sessionId" value={session.id} />
-                  <button
-                    type="submit"
-                    className="text-sm text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
-                  >
-                    Stop
-                  </button>
-                </form>
-              </div>
+                  <div className="mt-4 flex items-center gap-2">
+                    <Link
+                      href={`/sessions/${session.id}`}
+                      className={buttonVariants({ size: "sm" })}
+                    >
+                      Open
+                    </Link>
+                    <ConfirmAction
+                      action={stopSession}
+                      fields={{ sessionId: session.id }}
+                      label="Stop"
+                      title="Stop this session?"
+                      description="The browser closes and the robot stops where it is. The conversation and any downloaded files stay available, but you cannot pick this session back up."
+                      confirmLabel="Stop it"
+                      destructive
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             </li>
           ))}
         </ul>
       ) : null}
 
       <section>
-        <h2 className="text-base font-medium">Recent</h2>
+        <h2 className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+          Recent
+        </h2>
+
         {recent.length === 0 ? (
-          <div className="mt-3 rounded-lg border border-dashed border-neutral-300 px-6 py-12 text-center dark:border-neutral-700">
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
-              {startable.length === 0
-                ? "Register a site and add your account on it, then start a session."
-                : "Nothing yet. Start a session to put a browser to work."}
-            </p>
-          </div>
+          <Card className="mt-3">
+            <CardContent className="py-12 text-center">
+              <p className="text-muted-foreground text-sm">
+                {startable.length === 0
+                  ? "Register a site and add your account on it, then start a session."
+                  : "Nothing yet. Start a session to put a browser to work."}
+              </p>
+            </CardContent>
+          </Card>
         ) : (
-          <ul className="mt-3 divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-            {recent.map((session) => (
-              <li key={session.id}>
-                <Link
-                  href={`/sessions/${session.id}`}
-                  className="flex items-center gap-4 px-4 py-3 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900"
-                >
-                  <span className="flex-1 truncate">
-                    {session.title ?? session.siteName ?? "Session"}
-                  </span>
-                  <span className="hidden text-neutral-400 sm:inline">
-                    {new Date(session.startedAt).toLocaleString()}
-                  </span>
-                  <span className="text-neutral-500 dark:text-neutral-400">{session.status}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <Card className="mt-3 py-0">
+            <ul className="divide-y">
+              {recent.map((session) => (
+                <li key={session.id}>
+                  <Link
+                    href={`/sessions/${session.id}`}
+                    className="hover:bg-accent/50 flex items-center gap-4 px-4 py-3 text-sm transition-colors"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {session.title ?? session.siteName ?? "Session"}
+                    </span>
+                    <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
+                      {new Date(session.startedAt).toLocaleString()}
+                    </span>
+                    <StatusLabel status={session.status} className="text-xs" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
         )}
       </section>
     </div>

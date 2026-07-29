@@ -1,26 +1,25 @@
 "use client";
 
 import { useActionState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { createSite, linkAccount, type FormState } from "./actions";
 
 const initial: FormState = {};
 
-const field =
-  "w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-400";
-const label = "mb-1.5 block text-sm font-medium";
-const button =
-  "rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900";
 
 function Feedback({ state }: { state: FormState }) {
   if (state.error) {
     return (
-      <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+      <p role="alert" className="text-sm text-destructive">
         {state.error}
       </p>
     );
   }
   if (state.success) {
-    return <p className="text-sm text-green-700 dark:text-green-400">{state.success}</p>;
+    return <p className="text-sm text-running">{state.success}</p>;
   }
   return null;
 }
@@ -30,70 +29,70 @@ export function AddSiteForm() {
 
   return (
     <form action={action} className="space-y-4">
-      <div>
-        <label className={label} htmlFor="name">
+      <div className="space-y-2">
+        <Label  htmlFor="name">
           Name
-        </label>
-        <input id="name" name="name" required className={field} placeholder="Acme ERP" />
+        </Label>
+        <Input id="name" name="name" required  placeholder="Acme ERP" />
       </div>
 
-      <div>
-        <label className={label} htmlFor="baseUrl">
+      <div className="space-y-2">
+        <Label  htmlFor="baseUrl">
           URL
-        </label>
-        <input
+        </Label>
+        <Input
           id="baseUrl"
           name="baseUrl"
           required
-          className={field}
+          
           placeholder="https://erp.example.com"
         />
       </div>
 
-      <div>
-        <label className={label} htmlFor="cookieName">
+      <div className="space-y-2">
+        <Label  htmlFor="cookieName">
           Session cookie name
-        </label>
-        <input
+        </Label>
+        <Input
           id="cookieName"
           name="cookieName"
           required
-          className={field}
+          
           placeholder="app-session"
         />
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-xs text-muted-foreground">
           The cookie the target application reads to identify a logged-in user.
         </p>
       </div>
 
-      <div>
-        <label className={label} htmlFor="secret">
+      <div className="space-y-2">
+        <Label  htmlFor="secret">
           Signing secret
-        </label>
-        <input id="secret" name="secret" type="password" required className={field} />
+        </Label>
+        <Input id="secret" name="secret" type="password" required  />
       </div>
 
-      <div>
-        <label className={label} htmlFor="notes">
-          Notes for the agent <span className="font-normal text-neutral-500">(optional)</span>
-        </label>
-        <textarea
+      <div className="space-y-2">
+        <Label  htmlFor="notes">
+          Notes for the agent <span className="text-muted-foreground font-normal">(optional)</span>
+        </Label>
+        <Textarea
           id="notes"
           name="notes"
           rows={3}
-          className={field}
+          
           placeholder="Purchase orders live at /purchase-orders. Suppliers are called vendors here."
         />
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-xs text-muted-foreground">
           Domain vocabulary and useful routes. This goes into the agent&apos;s instructions.
         </p>
       </div>
 
       <Feedback state={state} />
 
-      <button type="submit" disabled={pending} className={button}>
+      <Button type="submit" disabled={pending} >
         {pending ? "Registering…" : "Register site"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -111,61 +110,60 @@ export function LinkAccountForm({
     <form action={action} className="space-y-3">
       <input type="hidden" name="siteProfileId" value={siteProfileId} />
 
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm text-muted-foreground">
         These are your details <em>on {siteName}</em>, not your BrowserPilot login. The robot signs
         in as this person, so that application&apos;s own records show your name.
       </p>
 
-      <div>
-        <label className={label} htmlFor={`targetUserId-${siteProfileId}`}>
+      <div className="space-y-2">
+        <Label  htmlFor={`targetUserId-${siteProfileId}`}>
           User ID on {siteName}
-        </label>
-        <input
+        </Label>
+        <Input
           id={`targetUserId-${siteProfileId}`}
           name="targetUserId"
           required
-          className={field}
+          
           placeholder="3f7c1a52-9d4e-4b1a-8f2c-1a2b3c4d5e6f"
         />
       </div>
 
-      <div>
-        <label className={label} htmlFor={`targetEmail-${siteProfileId}`}>
+      <div className="space-y-2">
+        <Label  htmlFor={`targetEmail-${siteProfileId}`}>
           Email there
-        </label>
-        <input
+        </Label>
+        <Input
           id={`targetEmail-${siteProfileId}`}
           name="targetEmail"
           type="email"
           required
-          className={field}
         />
       </div>
 
-      <div>
-        <label className={label} htmlFor={`targetName-${siteProfileId}`}>
+      <div className="space-y-2">
+        <Label  htmlFor={`targetName-${siteProfileId}`}>
           Name there
-        </label>
-        <input id={`targetName-${siteProfileId}`} name="targetName" required className={field} />
+        </Label>
+        <Input id={`targetName-${siteProfileId}`} name="targetName" required  />
       </div>
 
-      <div>
-        <label className={label} htmlFor={`targetRole-${siteProfileId}`}>
-          Role there <span className="font-normal text-neutral-500">(optional)</span>
-        </label>
-        <input
+      <div className="space-y-2">
+        <Label  htmlFor={`targetRole-${siteProfileId}`}>
+          Role there <span className="text-muted-foreground font-normal">(optional)</span>
+        </Label>
+        <Input
           id={`targetRole-${siteProfileId}`}
           name="targetRole"
-          className={field}
+          
           placeholder="admin"
         />
       </div>
 
       <Feedback state={state} />
 
-      <button type="submit" disabled={pending} className={button}>
+      <Button type="submit" disabled={pending} >
         {pending ? "Saving…" : "Save my account"}
-      </button>
+      </Button>
     </form>
   );
 }

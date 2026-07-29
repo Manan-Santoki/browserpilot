@@ -27,7 +27,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
 
         {invite ? (
           <>
-            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="mt-1 text-sm text-muted-foreground">
               Set a password for <span className="font-medium">{invite.email}</span>.
             </p>
             <div className="mt-8">
@@ -36,7 +36,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           </>
         ) : (
           <>
-            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
+            <p className="mt-2 text-sm text-foreground/90">
               This invitation is invalid, already used, or expired.
             </p>
             <p className="mt-4 text-sm">

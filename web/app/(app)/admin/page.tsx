@@ -28,7 +28,7 @@ export default async function AdminPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Admin</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           Everything here affects other people, so each change is written to the audit log.
         </p>
       </div>
@@ -38,11 +38,11 @@ export default async function AdminPage() {
           <li key={card.href}>
             <Link
               href={card.href}
-              className="block rounded-lg border border-neutral-200 p-4 transition-colors hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600"
+              className="hover:border-signal/50 block rounded-lg border p-4 transition-colors"
             >
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">{card.title}</p>
+              <p className="text-sm text-muted-foreground">{card.title}</p>
               <p className="mt-1 text-lg font-medium">{card.value}</p>
-              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{card.blurb}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{card.blurb}</p>
             </Link>
           </li>
         ))}

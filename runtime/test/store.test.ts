@@ -45,9 +45,18 @@ afterAll(async () => {
 });
 
 describe("settings", () => {
-  test("falls back to defaults when nothing is stored", async () => {
+  // What is stored is whatever an admin last saved in the console, so assert
+  // the contract rather than the numbers. The defaulting itself is covered by
+  // the parseSettings tests, which do not need a database.
+  test("always returns a complete, usable policy", async () => {
     const settings = await store.settings();
-    expect(settings.perUserSessionLimit).toBe(DEFAULT_SETTINGS.perUserSessionLimit);
+
+    expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort());
+    expect(settings.perUserSessionLimit).toBeGreaterThanOrEqual(1);
+    expect(settings.globalSessionLimit).toBeGreaterThanOrEqual(1);
+    expect(settings.idleTimeoutMs).toBeGreaterThan(0);
+    expect(settings.hardCapMs).toBeGreaterThan(settings.idleTimeoutMs);
+    expect(settings.defaultModel.length).toBeGreaterThan(0);
   });
 });
 

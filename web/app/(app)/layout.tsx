@@ -1,58 +1,101 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { Separator } from "@/components/ui/separator";
 import { logout } from "./actions";
+
+const NAV = [
+  { href: "/", label: "Sessions" },
+  { href: "/files", label: "Files" },
+  { href: "/sites", label: "Sites" },
+  { href: "/devices", label: "Devices" },
+];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-neutral-200 dark:border-neutral-800">
-        <div className="mx-auto flex max-w-7xl items-center gap-6 px-6 py-3">
-          <Link href="/" className="text-sm font-semibold tracking-tight">
-            BrowserPilot
+    <div className="flex min-h-screen">
+      {/* A left rail rather than a top bar: a console is navigated rarely and
+          watched constantly, so navigation should sit out of the way. */}
+      <aside className="bg-sidebar hidden w-56 shrink-0 flex-col border-r md:flex">
+        <div className="px-5 py-5">
+          <Link href="/" className="flex items-baseline gap-2">
+            <span className="text-signal font-mono text-sm">▚</span>
+            <span className="text-[15px] font-semibold tracking-tight">BrowserPilot</span>
           </Link>
+          <p className="text-muted-foreground mt-1 text-xs">Robots at the controls</p>
+        </div>
 
-          <nav className="flex items-center gap-4 text-sm text-neutral-600 dark:text-neutral-400">
-            <Link href="/" className="hover:text-neutral-900 dark:hover:text-neutral-100">
-              Sessions
+        <Separator />
+
+        <nav className="flex flex-1 flex-col gap-0.5 p-3">
+          {NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-3 py-2 text-sm transition-colors"
+            >
+              {item.label}
             </Link>
-            <Link href="/sites" className="hover:text-neutral-900 dark:hover:text-neutral-100">
-              Sites
-            </Link>
-            <Link href="/files" className="hover:text-neutral-900 dark:hover:text-neutral-100">
-              Files
-            </Link>
-            <Link href="/devices" className="hover:text-neutral-900 dark:hover:text-neutral-100">
-              Devices
-            </Link>
-            {user.role === "ADMIN" ? (
-              <Link href="/admin" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+          ))}
+
+          {user.role === "ADMIN" ? (
+            <>
+              <Separator className="my-2" />
+              <Link
+                href="/admin"
+                className="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-3 py-2 text-sm transition-colors"
+              >
                 Admin
               </Link>
-            ) : null}
-          </nav>
+            </>
+          ) : null}
+        </nav>
 
-          <div className="ml-auto flex items-center gap-3 text-sm">
-            <Link
-              href="/account"
-              className="text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
+        <Separator />
+
+        <div className="p-3">
+          <Link
+            href="/account"
+            className="hover:bg-accent block rounded-md px-3 py-2 transition-colors"
+          >
+            <span className="block truncate text-sm font-medium">{user.name}</span>
+            <span className="text-muted-foreground block truncate text-xs">
+              {user.role === "ADMIN" ? "Administrator" : "User"}
+            </span>
+          </Link>
+          <form action={logout}>
+            <button
+              type="submit"
+              className="text-muted-foreground hover:text-foreground w-full rounded-md px-3 py-1.5 text-left text-xs transition-colors"
             >
-              {user.name}
-            </Link>
-            <form action={logout}>
-              <button
-                type="submit"
-                className="text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
+              Sign out
+            </button>
+          </form>
         </div>
-      </header>
+      </aside>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      {/* Mobile: the rail collapses to a strip of links. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-4 border-b px-4 py-3 md:hidden">
+          <Link href="/" className="text-sm font-semibold">
+            <span className="text-signal font-mono">▚</span> BrowserPilot
+          </Link>
+          <nav className="text-muted-foreground flex gap-3 overflow-x-auto text-sm">
+            {NAV.map((item) => (
+              <Link key={item.href} href={item.href} className="whitespace-nowrap">
+                {item.label}
+              </Link>
+            ))}
+            {user.role === "ADMIN" ? <Link href="/admin">Admin</Link> : null}
+            <Link href="/account">Account</Link>
+          </nav>
+        </header>
+
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

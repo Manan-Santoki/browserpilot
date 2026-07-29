@@ -43,29 +43,29 @@ export default async function AuditPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Audit log</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           The 200 most recent events.
         </p>
       </div>
 
       {entries.length === 0 ? (
-        <p className="text-sm text-neutral-500">Nothing recorded yet.</p>
+        <p className="text-muted-foreground text-sm">Nothing recorded yet.</p>
       ) : (
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 text-sm dark:divide-neutral-800 dark:border-neutral-800">
+        <ul className="divide-y divide-border rounded-lg border text-sm">
           {entries.map((entry) => (
             <li key={entry.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 py-2.5">
               <span className="font-medium">{entry.actorName ?? "Someone"}</span>
-              <span className="text-neutral-600 dark:text-neutral-300">
+              <span className="text-foreground/90">
                 {PHRASING[entry.action] ?? entry.action}
               </span>
               {entry.metadata ? (
-                <span className="truncate text-xs text-neutral-400">
+                <span className="truncate text-xs text-muted-foreground">
                   {Object.entries(entry.metadata as Record<string, unknown>)
                     .map(([k, v]) => `${k}: ${String(v)}`)
                     .join(" · ")}
                 </span>
               ) : null}
-              <span className="ml-auto whitespace-nowrap text-xs text-neutral-400">
+              <span className="ml-auto whitespace-nowrap text-xs text-muted-foreground">
                 {new Date(entry.createdAt).toLocaleString()}
               </span>
             </li>

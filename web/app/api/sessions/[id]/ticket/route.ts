@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { robotSessions } from "@browserpilot/db";
 import { db } from "@/lib/db";
 import { ticketFor, runtimeWsUrl } from "@/lib/runtime";

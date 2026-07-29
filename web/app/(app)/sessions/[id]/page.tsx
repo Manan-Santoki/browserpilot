@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { runtimeHttpUrl } from "@/lib/runtime";
 import { loadTranscript } from "@/lib/transcript";
 import { restartBrowser, stopSession } from "../actions";
+import { ConfirmAction } from "@/components/confirm-action";
 import { LiveSession } from "./live";
 import { SessionFiles } from "./files";
 import { TranscriptView } from "./transcript-view";
@@ -43,41 +44,42 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         <div>
           <Link
             href="/"
-            className="text-sm text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
+            className="text-muted-foreground hover:text-foreground text-sm transition-colors"
           >
             ← Sessions
           </Link>
           <h1 className="mt-2 text-xl font-semibold tracking-tight">
             {session.title ?? session.siteName ?? "Session"}
           </h1>
-          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          <p className="text-muted-foreground mt-1 font-mono text-xs">
             {session.siteName ? `${session.siteName} · ` : ""}
-            {session.siteUrl ?? ""} · started{" "}
-            {new Date(session.startedAt).toLocaleString()}
+            {session.siteUrl ?? ""} · {new Date(session.startedAt).toLocaleString()}
           </p>
         </div>
 
         {!finished ? (
           <div className="flex items-center gap-2">
-            <form action={restartBrowser}>
-              <input type="hidden" name="sessionId" value={session.id} />
-              <button
-                type="submit"
-                title="Replace the browser. The conversation is kept, but anything on screen is lost."
-                className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-900"
-              >
-                Restart browser
-              </button>
-            </form>
-          <form action={stopSession}>
-            <input type="hidden" name="sessionId" value={session.id} />
-            <button
-              type="submit"
-              className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-900"
-            >
-              Stop session
-            </button>
-          </form>
+            <ConfirmAction
+              action={restartBrowser}
+              fields={{ sessionId: session.id }}
+              size="default"
+              variant="outline"
+              label="Restart browser"
+              title="Restart the browser?"
+              description="A fresh browser opens at the site's home page. The conversation so far is kept, but anything currently on screen — a half-filled form, an open record — is lost."
+              confirmLabel="Restart it"
+            />
+            <ConfirmAction
+              action={stopSession}
+              fields={{ sessionId: session.id }}
+              size="default"
+              variant="outline"
+              label="Stop session"
+              title="Stop this session?"
+              description="The browser closes and the robot stops where it is. The conversation and any downloaded files stay available, but you cannot pick this session back up."
+              confirmLabel="Stop it"
+              destructive
+            />
           </div>
         ) : null}
       </div>
@@ -87,11 +89,11 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
       {finished ? (
         <div className="space-y-4">
-          <div className="rounded-lg border border-neutral-200 px-4 py-3 text-sm dark:border-neutral-800">
-            <span className="text-neutral-600 dark:text-neutral-300">
+          <div className="rounded-lg border px-4 py-3 text-sm">
+            <span className="text-foreground/90">
               This session has ended{session.endedReason ? `: ${session.endedReason}` : "."}
             </span>{" "}
-            <span className="text-neutral-500 dark:text-neutral-400">
+            <span className="text-muted-foreground">
               Its browser is gone, but the conversation and files below are kept.
             </span>
           </div>

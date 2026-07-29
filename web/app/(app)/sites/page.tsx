@@ -4,6 +4,9 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { deleteSite } from "./actions";
 import { AddSiteForm, LinkAccountForm } from "./forms";
+import { ConfirmAction } from "@/components/confirm-action";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default async function SitesPage({
   searchParams,
@@ -33,21 +36,21 @@ export default async function SitesPage({
     <div className="space-y-10">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Sites</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           Applications the robot can drive. Each needs your account on it before you can start a
           session.
         </p>
       </div>
 
       {error === "running" ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-destructive">
           That site still has a browser running. Stop the session first, then delete it.
         </p>
       ) : null}
 
       {sites.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-neutral-300 px-6 py-12 text-center dark:border-neutral-700">
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <div className="rounded-lg border border-dashed px-6 py-12 text-center">
+          <p className="text-sm text-muted-foreground">
             No sites registered yet.
             {user.role === "ADMIN"
               ? " Add one below."
@@ -55,63 +58,61 @@ export default async function SitesPage({
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+        <ul className="divide-y divide-border rounded-lg border">
           {sites.map((site) => (
-            <li key={site.id} className="px-4 py-4">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="font-medium">{site.name}</span>
-                <span className="text-sm text-neutral-500 dark:text-neutral-400">
-                  {site.baseUrl}
-                </span>
-                {!site.isActive ? (
-                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-500 dark:bg-neutral-800">
-                    disabled
-                  </span>
-                ) : null}
+            <li key={site.id} className="flex flex-wrap items-start gap-x-6 gap-y-3 px-4 py-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="font-medium">{site.name}</span>
+                  <span className="text-muted-foreground font-mono text-xs">{site.baseUrl}</span>
+                  {!site.isActive ? <Badge variant="secondary">disabled</Badge> : null}
+                </div>
+
+                {site.accountEmail ? (
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    You act as <span className="text-foreground">{site.accountEmail}</span> here.
+                  </p>
+                ) : (
+                  <details className="mt-3">
+                    <summary className="text-signal cursor-pointer text-sm">
+                      You have no account on this site yet — add one to start sessions
+                    </summary>
+                    <div className="mt-3 max-w-lg">
+                      <LinkAccountForm siteProfileId={site.id} siteName={site.name} />
+                    </div>
+                  </details>
+                )}
               </div>
 
               {user.role === "ADMIN" ? (
-                <form action={deleteSite} className="mt-2">
-                  <input type="hidden" name="siteProfileId" value={site.id} />
-                  <button
-                    type="submit"
-                    className="text-sm text-red-600 underline-offset-4 hover:underline dark:text-red-400"
-                  >
-                    Delete site
-                  </button>
-                </form>
+                <ConfirmAction
+                  action={deleteSite}
+                  fields={{ siteProfileId: site.id }}
+                  label="Delete"
+                  title={`Delete ${site.name}?`}
+                  description="The site, everyone's accounts on it, and its stored signing secret are removed. Past sessions and their files stay, but nobody can start a new session against this site until it is registered again."
+                  confirmLabel="Delete site"
+                  destructive
+                />
               ) : null}
-
-              {site.accountEmail ? (
-                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                  You act as <span className="font-medium">{site.accountEmail}</span> here.
-                </p>
-              ) : (
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-sm text-amber-700 dark:text-amber-500">
-                    You have no account on this site yet — add one to start sessions
-                  </summary>
-                  <div className="mt-3 max-w-lg">
-                    <LinkAccountForm siteProfileId={site.id} siteName={site.name} />
-                  </div>
-                </details>
-              )}
             </li>
           ))}
         </ul>
       )}
 
       {user.role === "ADMIN" ? (
-        <section className="max-w-lg">
-          <h2 className="text-base font-medium">Register a site</h2>
-          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            The signing secret must match the target application&apos;s own session secret — that is
-            what lets the robot arrive already logged in. It is encrypted before it is stored.
-          </p>
-          <div className="mt-4">
+        <Card className="max-w-2xl">
+          <CardHeader>
+            <CardTitle>Register a site</CardTitle>
+            <CardDescription>
+              The signing secret must match the target application&apos;s own session secret — that
+              is what lets the robot arrive already logged in. It is encrypted before it is stored.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <AddSiteForm />
-          </div>
-        </section>
+          </CardContent>
+        </Card>
       ) : null}
     </div>
   );

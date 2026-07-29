@@ -15,7 +15,7 @@ const SESSION_TTL_DAYS = 14;
  * served over plain HTTP would set a secure cookie the browser silently drops,
  * and login would fail with nothing to see in the logs.
  */
-function useSecureCookie(): boolean {
+function secureCookie(): boolean {
   return (process.env.BP_WEB_URL ?? "").startsWith("https://");
 }
 
@@ -47,7 +47,7 @@ export async function createSession(userId: string): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: useSecureCookie(),
+    secure: secureCookie(),
     sameSite: "lax",
     path: "/",
     expires: expiresAt,

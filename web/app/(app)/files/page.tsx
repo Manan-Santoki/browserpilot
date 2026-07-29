@@ -70,20 +70,20 @@ export default async function FilesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Files</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           Everything the robot has downloaded{isAdmin ? " across all users" : ""}. Files stay
           available after their session ends.
         </p>
       </div>
 
       {files.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-neutral-300 px-6 py-16 text-center dark:border-neutral-700">
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <div className="rounded-lg border border-dashed px-6 py-16 text-center">
+          <p className="text-sm text-muted-foreground">
             No downloads yet. Ask the robot to fetch a document and it will appear here.
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+        <ul className="divide-y divide-border rounded-lg border">
           {files.map((file) => (
             <li
               key={`${file.sessionId}:${file.filename}`}
@@ -98,12 +98,12 @@ export default async function FilesPage() {
 
               <Link
                 href={`/sessions/${file.sessionId}`}
-                className="truncate text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
+                className="text-muted-foreground hover:text-foreground truncate transition-colors"
               >
                 {file.sessionTitle ?? file.siteName ?? "session"}
               </Link>
 
-              <span className="whitespace-nowrap text-xs text-neutral-400">
+              <span className="whitespace-nowrap text-xs text-muted-foreground">
                 {new Date(file.at).toLocaleString()}
               </span>
             </li>

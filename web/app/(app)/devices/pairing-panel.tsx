@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { createPairingCode, type PairingState } from "./actions";
 
 export function PairingPanel() {
@@ -48,47 +50,43 @@ export function PairingPanel() {
   const expired = state?.code && secondsLeft === 0;
 
   return (
-    <section className="rounded-lg border border-neutral-200 p-5 dark:border-neutral-800">
+    <Card className="p-5">
       {!state?.code ? (
         <div className="space-y-3">
-          <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          <p className="text-sm text-foreground/90">
             Generate a code, then scan it with the BrowserPilot app. The code works once and
             expires in five minutes.
           </p>
-          <button
-            onClick={generate}
-            disabled={pending}
-            className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-          >
+          <Button onClick={generate} disabled={pending}>
             {pending ? "Generating…" : "Show pairing code"}
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-6">
           <div className={expired ? "opacity-30" : ""}>
-            <canvas ref={canvasRef} className="rounded bg-white p-2" />
+            <canvas ref={canvasRef} className="rounded bg-white p-2" /* white by necessity: scanners need the contrast */ />
           </div>
 
           <div className="space-y-2">
-            <p className="font-mono text-2xl tracking-[0.2em]">{state.code}</p>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="text-signal font-mono text-2xl tracking-[0.2em]">{state.code}</p>
+            <p className="text-sm text-muted-foreground">
               {expired
                 ? "This code has expired."
                 : `Expires in ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}`}
             </p>
-            <p className="max-w-xs text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="max-w-xs text-xs text-muted-foreground">
               Scan the code, or type it into the app if the camera will not cooperate.
             </p>
             <button
               onClick={generate}
               disabled={pending}
-              className="text-sm text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
+              className="text-muted-foreground text-sm underline-offset-4 hover:underline dark:text-muted-foreground"
             >
               Generate a new code
             </button>
           </div>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

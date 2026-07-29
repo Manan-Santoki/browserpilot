@@ -10,19 +10,17 @@ import type { ChatItem } from "@/lib/transcript";
 export function TranscriptView({ items }: { items: ChatItem[] }) {
   if (items.length === 0) {
     return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Nothing was said in this session.
-      </p>
+      <p className="text-muted-foreground text-sm">Nothing was said in this session.</p>
     );
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-neutral-200 px-4 py-4 text-sm dark:border-neutral-800">
+    <div className="space-y-3 rounded-lg border px-4 py-4 text-sm">
       {items.map((item, i) => {
         if (item.kind === "you") {
           return (
             <p key={i} className="text-right">
-              <span className="inline-block rounded-lg bg-neutral-900 px-3 py-1.5 text-white dark:bg-white dark:text-neutral-900">
+              <span className="bg-secondary text-secondary-foreground inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-left">
                 {item.text}
               </span>
             </p>
@@ -37,14 +35,14 @@ export function TranscriptView({ items }: { items: ChatItem[] }) {
         }
         if (item.kind === "tool") {
           return (
-            <p key={i} className="text-xs text-neutral-400">
+            <p key={i} className="text-muted-foreground/80 font-mono text-xs">
               {item.text}
             </p>
           );
         }
         if (item.kind === "error") {
           return (
-            <p key={i} className="text-red-600 dark:text-red-400">
+            <p key={i} className="text-destructive">
               {item.text}
             </p>
           );
@@ -52,14 +50,18 @@ export function TranscriptView({ items }: { items: ChatItem[] }) {
         if (item.kind === "file") {
           return (
             <p key={i}>
-              <a href={item.url} className="underline underline-offset-4">
-                ⬇ {item.filename}
+              <a
+                href={item.url}
+                className="bg-secondary hover:bg-accent inline-flex items-center gap-2 rounded-md px-3 py-1.5 font-mono text-xs transition-colors"
+              >
+                <span aria-hidden>↓</span>
+                {item.filename}
               </a>
             </p>
           );
         }
         return (
-          <p key={i} className="text-xs text-amber-700 dark:text-amber-500">
+          <p key={i} className="text-signal font-mono text-xs">
             {item.summary} — {item.resolved ?? "never answered"}
           </p>
         );

@@ -1,4 +1,19 @@
 import { desc } from "drizzle-orm";
+import { ConfirmAction } from "@/components/confirm-action";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const ROLES = [
+  { value: "USER", label: "User" },
+  { value: "ADMIN", label: "Admin" },
+];
 import { users } from "@browserpilot/db";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -24,12 +39,12 @@ export default async function UsersPage() {
     <div className="space-y-10">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Users</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           Accounts are created by invitation only.
         </p>
       </div>
 
-      <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+      <ul className="divide-y divide-border rounded-lg border">
         {people.map((person) => {
           const isSelf = person.id === admin.id;
           return (
@@ -37,50 +52,62 @@ export default async function UsersPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">
                   {person.name}
-                  {isSelf ? <span className="ml-2 text-xs text-neutral-400">you</span> : null}
+                  {isSelf ? <span className="ml-2 text-xs text-muted-foreground">you</span> : null}
                 </p>
-                <p className="truncate text-sm text-neutral-500 dark:text-neutral-400">
+                <p className="truncate text-sm text-muted-foreground">
                   {person.email}
                 </p>
               </div>
 
-              {!person.isActive ? (
-                <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-500 dark:bg-neutral-800">
-                  deactivated
-                </span>
-              ) : null}
+              {!person.isActive ? <Badge variant="secondary">deactivated</Badge> : null}
 
               <form action={setUserRole} className="flex items-center gap-2">
                 <input type="hidden" name="userId" value={person.id} />
-                <select
+                <Select
                   name="role"
                   defaultValue={person.role}
                   disabled={isSelf}
-                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900"
+                  items={ROLES}
                 >
-                  <option value="USER">User</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-                <button
-                  type="submit"
-                  disabled={isSelf}
-                  className="text-sm text-neutral-500 underline-offset-4 hover:underline disabled:opacity-40 dark:text-neutral-400"
-                >
+                  <SelectTrigger size="sm" className="w-[104px]" aria-label="Role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLES.map((role) => (
+                      <SelectItem key={role.value} value={role.value}>
+                        {role.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button type="submit" size="sm" variant="ghost" disabled={isSelf}>
                   Save
-                </button>
+                </Button>
               </form>
 
-              <form action={setUserActive}>
-                <input type="hidden" name="userId" value={person.id} />
-                <input type="hidden" name="active" value={person.isActive ? "false" : "true"} />
-                <button
-                  type="submit"
-                  disabled={isSelf}
-                  className="text-sm text-neutral-500 underline-offset-4 hover:underline disabled:opacity-40 dark:text-neutral-400"
-                >
-                  {person.isActive ? "Deactivate" : "Reactivate"}
-                </button>
-              </form>
+              {isSelf ? (
+                <Button size="sm" variant="ghost" disabled>
+                  Deactivate
+                </Button>
+              ) : person.isActive ? (
+                <ConfirmAction
+                  action={setUserActive}
+                  fields={{ userId: person.id, active: "false" }}
+                  label="Deactivate"
+                  title={`Deactivate ${person.name}?`}
+                  description="They are signed out and cannot sign in again or start sessions. Their past sessions and files are kept, and you can reactivate them at any time."
+                  confirmLabel="Deactivate"
+                  destructive
+                />
+              ) : (
+                <form action={setUserActive}>
+                  <input type="hidden" name="userId" value={person.id} />
+                  <input type="hidden" name="active" value="true" />
+                  <Button type="submit" size="sm" variant="ghost">
+                    Reactivate
+                  </Button>
+                </form>
+              )}
             </li>
           );
         })}

@@ -5,13 +5,14 @@ import { createDatabase, robotSessions, siteAccounts, siteProfiles, users } from
 import { SessionManager, SessionError, type ManagerDeps } from "../src/session/manager";
 import { Store } from "../src/store";
 import type { RobotEvent } from "../src/session/events";
+import { withTestSettings } from "./support/settings";
 
 const url =
   process.env.DATABASE_URL ?? "postgresql://browserpilot:devpassword@127.0.0.1:55432/browserpilot";
 const MASTER_KEY = "k".repeat(44);
 
 const db = createDatabase(url, { max: 3 });
-const store = new Store(url, MASTER_KEY);
+const store = withTestSettings(new Store(url, MASTER_KEY));
 
 const stamp = Date.now();
 let userId: string;
@@ -184,6 +185,10 @@ describe("starting a session", () => {
   });
 });
 
+// Each create/stop is several round-trips to Postgres, which is remote here.
+// These two walk the cap up and back down, so they need more than the 5s default.
+const DB_HEAVY_TIMEOUT_MS = 30_000;
+
 describe("concurrency limits", () => {
   test("the per-user limit is enforced", async () => {
     const { deps } = makeDeps();
@@ -196,7 +201,7 @@ describe("concurrency limits", () => {
 
     for (const id of ids) await manager.stop(id);
     await cleanupSessions();
-  });
+  }, DB_HEAVY_TIMEOUT_MS);
 
   test("stopping a session frees a slot", async () => {
     const { deps } = makeDeps();
@@ -213,7 +218,7 @@ describe("concurrency limits", () => {
     await manager.stop(ids[2]!);
     await manager.stop(replacement);
     await cleanupSessions();
-  });
+  }, DB_HEAVY_TIMEOUT_MS);
 });
 
 describe("ownership", () => {

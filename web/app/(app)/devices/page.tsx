@@ -3,6 +3,7 @@ import { remoteDevices } from "@browserpilot/db";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { revokeDevice } from "./actions";
+import { ConfirmAction } from "@/components/confirm-action";
 import { PairingPanel } from "./pairing-panel";
 
 export default async function DevicesPage() {
@@ -26,7 +27,7 @@ export default async function DevicesPage() {
     <div className="space-y-10">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Devices</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           Pair a phone to reach these same sessions from the mobile app.
         </p>
       </div>
@@ -36,31 +37,31 @@ export default async function DevicesPage() {
       <section>
         <h2 className="text-base font-medium">Paired devices</h2>
         {active.length === 0 ? (
-          <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+          <p className="mt-3 text-sm text-muted-foreground">
             No devices paired yet.
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+          <ul className="mt-3 divide-y divide-border rounded-lg border">
             {active.map((device) => (
               <li key={device.id} className="flex items-center gap-4 px-4 py-3 text-sm">
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{device.name}</p>
-                  <p className="text-neutral-500 dark:text-neutral-400">
+                  <p className="text-muted-foreground">
                     paired {new Date(device.createdAt).toLocaleDateString()}
                     {device.lastSeenAt
                       ? ` · last seen ${new Date(device.lastSeenAt).toLocaleString()}`
                       : ""}
                   </p>
                 </div>
-                <form action={revokeDevice}>
-                  <input type="hidden" name="deviceId" value={device.id} />
-                  <button
-                    type="submit"
-                    className="text-sm text-neutral-500 underline-offset-4 hover:underline dark:text-neutral-400"
-                  >
-                    Revoke
-                  </button>
-                </form>
+                <ConfirmAction
+                  action={revokeDevice}
+                  fields={{ deviceId: device.id }}
+                  label="Revoke"
+                  title={`Revoke ${device.name}?`}
+                  description="That phone is signed out immediately and cannot reach your sessions again until you pair it a second time."
+                  confirmLabel="Revoke it"
+                  destructive
+                />
               </li>
             ))}
           </ul>

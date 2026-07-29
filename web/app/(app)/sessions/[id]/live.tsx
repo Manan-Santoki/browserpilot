@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { StatusLabel } from "@/components/status-lamp";
 import { PushToTalk } from "./push-to-talk";
 
 import type { ChatItem } from "@/lib/transcript";
@@ -159,8 +164,8 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
     wsRef.current?.send(JSON.stringify({ type: "approval", requestId, approved }));
   };
 
-  const togglePreview = () => {
-    const next = !previewOn;
+  const togglePreview = (checked?: boolean) => {
+    const next = checked ?? !previewOn;
     setPreviewOn(next);
     wsRef.current?.send(JSON.stringify({ type: "preview", enabled: next }));
   };
@@ -169,59 +174,45 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
 
   if (ended) {
     return (
-      <div className="rounded-lg border border-neutral-200 px-6 py-12 text-center dark:border-neutral-800">
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+      <Card className="px-6 py-12 text-center">
+        <p className="text-sm">
           This session has ended{ended.reason ? `: ${ended.reason}` : "."}
         </p>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-          Its browser is gone, so there is nothing left to watch or talk to.
+        <p className="text-muted-foreground mt-1 text-sm">
+          Reload to read the conversation and files it left behind.
         </p>
-        <a
-          href="/"
-          className="mt-4 inline-block rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
-        >
-          Back to sessions
-        </a>
-      </div>
+        <div className="mt-4">
+          <Button onClick={() => window.location.reload()}>Reload</Button>
+        </div>
+      </Card>
     );
   }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <section className="flex h-[70vh] flex-col rounded-lg border border-neutral-200 dark:border-neutral-800">
-        <header className="flex items-center gap-2 border-b border-neutral-200 px-4 py-2.5 text-sm dark:border-neutral-800">
-          <span
-            className={`inline-block h-2 w-2 rounded-full ${
-              status === "awaiting_approval"
-                ? "bg-amber-500"
-                : busy
-                  ? "animate-pulse bg-green-500"
-                  : connected
-                    ? "bg-neutral-400"
-                    : "bg-red-500"
-            }`}
-          />
-          <span className="text-neutral-600 dark:text-neutral-300">{status}</span>
-
+      <Card className="flex h-[72vh] flex-col gap-0 overflow-hidden py-0">
+        <header className="flex items-center gap-2 border-b px-4 py-2.5">
+          <StatusLabel status={connected ? status : "disconnected"} />
           {!connected ? (
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
               onClick={() => {
                 setStatus("connecting");
                 setReconnectNonce((n) => n + 1);
               }}
-              className="ml-auto rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-900"
             >
               Reconnect
-            </button>
+            </Button>
           ) : null}
         </header>
 
-        <div ref={logRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm">
+        <div ref={logRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm">
           {items.length === 0 ? (
-            <p className="text-neutral-400">
-              Tell the robot what to do. It will ask if something is ambiguous, and wait for your
-              approval before anything destructive.
+            <p className="text-muted-foreground">
+              Tell the robot what to do. It asks when something is ambiguous, and waits for you
+              before anything destructive.
             </p>
           ) : null}
 
@@ -229,7 +220,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             if (item.kind === "you") {
               return (
                 <p key={i} className="text-right">
-                  <span className="inline-block rounded-lg bg-neutral-900 px-3 py-1.5 text-white dark:bg-white dark:text-neutral-900">
+                  <span className="bg-secondary text-secondary-foreground inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-left">
                     {item.text}
                   </span>
                 </p>
@@ -243,15 +234,18 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
               );
             }
             if (item.kind === "tool") {
+              // The activity feed is a machine log, so it is set as one — mono,
+              // dim, and visually distinct from the agent's prose above it.
               return (
-                <p key={i} className="text-xs text-neutral-400">
+                <p key={i} className="text-muted-foreground/80 font-mono text-xs">
+                  <span className="text-muted-foreground/50 mr-2">›</span>
                   {item.text}
                 </p>
               );
             }
             if (item.kind === "error") {
               return (
-                <p key={i} className="text-red-600 dark:text-red-400">
+                <p key={i} className="text-destructive">
                   {item.text}
                 </p>
               );
@@ -261,11 +255,10 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
                 <p key={i}>
                   <a
                     href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline underline-offset-4"
+                    className="bg-secondary hover:bg-accent inline-flex items-center gap-2 rounded-md px-3 py-1.5 font-mono text-xs transition-colors"
                   >
-                    ⬇ {item.filename}
+                    <span aria-hidden>↓</span>
+                    {item.filename}
                   </a>
                 </p>
               );
@@ -273,26 +266,26 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             return (
               <div
                 key={i}
-                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700/60 dark:bg-amber-950/40"
+                className="border-signal/40 bg-signal/5 rounded-lg border px-3 py-2.5"
               >
-                <p className="font-medium">Approval needed</p>
-                <p className="mt-0.5 text-neutral-600 dark:text-neutral-300">{item.summary}</p>
+                <p className="text-signal font-medium">Waiting for you</p>
+                <p className="text-foreground/90 mt-1 font-mono text-xs break-all">
+                  {item.summary}
+                </p>
                 {item.resolved ? (
-                  <p className="mt-1 text-xs text-neutral-500">{item.resolved}</p>
+                  <p className="text-muted-foreground mt-2 text-xs">{item.resolved}</p>
                 ) : (
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      onClick={() => respond(item.requestId, true)}
-                      className="rounded-md bg-neutral-900 px-2.5 py-1 text-xs font-medium text-white dark:bg-white dark:text-neutral-900"
-                    >
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" onClick={() => respond(item.requestId, true)}>
                       Approve
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => respond(item.requestId, false)}
-                      className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium dark:border-neutral-600"
                     >
                       Deny
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -300,56 +293,55 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
           })}
         </div>
 
-        <form onSubmit={send} className="flex gap-2 border-t border-neutral-200 p-3 dark:border-neutral-800">
+        <form onSubmit={send} className="flex items-center gap-2 border-t p-3">
           <PushToTalk
             language={language}
             disabled={!connected}
             onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))}
           />
-          <input
+          <Input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             disabled={!connected}
-            placeholder={connected ? "Tell the robot what to do…" : "Not connected"}
-            className="flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900"
+            placeholder={
+              !connected
+                ? "Not connected"
+                : busy
+                  ? "Working — anything you send now goes next"
+                  : "Tell the robot what to do…"
+            }
+            className="flex-1"
           />
-          <button
-            type="submit"
-            disabled={!connected || !draft.trim()}
-            className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-white dark:text-neutral-900"
-          >
+          <Button type="submit" disabled={!connected || !draft.trim()}>
             Send
-          </button>
+          </Button>
         </form>
-      </section>
+      </Card>
 
-      <section className="flex h-[70vh] flex-col rounded-lg border border-neutral-200 dark:border-neutral-800">
-        <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-2 text-sm dark:border-neutral-800">
-          <span className="text-neutral-600 dark:text-neutral-300">Browser</span>
-          <label className="flex items-center gap-2 text-xs text-neutral-500">
-            <input
-              type="checkbox"
-              checked={previewOn}
-              onChange={togglePreview}
-              disabled={!connected}
-            />
+      <Card className="flex h-[72vh] flex-col gap-0 overflow-hidden py-0">
+        <header className="flex items-center justify-between border-b px-4 py-2.5">
+          <span className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+            Browser
+          </span>
+          <label className="text-muted-foreground flex items-center gap-2 text-xs">
+            <Switch checked={previewOn} onCheckedChange={togglePreview} disabled={!connected} />
             Live preview
           </label>
         </header>
 
-        <div className="flex flex-1 items-center justify-center overflow-hidden bg-neutral-950">
+        <div className="bg-background flex flex-1 items-center justify-center overflow-hidden">
           {frameUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={frameUrl} alt="Live browser" className="max-h-full max-w-full object-contain" />
           ) : (
-            <p className="px-6 text-center text-sm text-neutral-500">
+            <p className="text-muted-foreground px-6 text-center text-sm">
               {previewOn
                 ? "Waiting for the first frame…"
                 : "Turn on live preview to watch the browser."}
             </p>
           )}
         </div>
-      </section>
+      </Card>
     </div>
   );
 }
