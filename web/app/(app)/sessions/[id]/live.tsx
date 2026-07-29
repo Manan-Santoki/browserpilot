@@ -3,19 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PushToTalk } from "./push-to-talk";
 
-type ChatItem =
-  | { kind: "you"; text: string }
-  | { kind: "agent"; text: string }
-  | { kind: "tool"; text: string }
-  | { kind: "status"; text: string }
-  | { kind: "error"; text: string }
-  | { kind: "file"; filename: string; url: string }
-  | { kind: "approval"; requestId: string; summary: string; resolved?: "approved" | "denied" };
+import type { ChatItem } from "@/lib/transcript";
 
-type Props = { sessionId: string; runtimeHttpUrl: string; language: string };
+type Props = {
+  sessionId: string;
+  runtimeHttpUrl: string;
+  language: string;
+  /** The conversation so far, read from the database on the server. */
+  initialItems: ChatItem[];
+};
 
-export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
-  const [items, setItems] = useState<ChatItem[]>([]);
+export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems }: Props) {
+  // Seeded from the transcript so a reload shows the conversation, and any
+  // approval still waiting for an answer is there to answer.
+  const [items, setItems] = useState<ChatItem[]>(initialItems);
   const [status, setStatus] = useState("connecting");
   const [ended, setEnded] = useState<{ reason: string | null } | null>(null);
   const [connected, setConnected] = useState(false);
@@ -244,13 +245,6 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
             if (item.kind === "tool") {
               return (
                 <p key={i} className="text-xs text-neutral-400">
-                  {item.text}
-                </p>
-              );
-            }
-            if (item.kind === "status") {
-              return (
-                <p key={i} className="text-xs text-blue-600 dark:text-blue-400">
                   {item.text}
                 </p>
               );

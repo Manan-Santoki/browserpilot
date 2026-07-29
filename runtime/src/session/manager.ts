@@ -249,6 +249,10 @@ export class SessionManager {
     session.lastActivityAt = this.deps.now();
     this.setStatus(session, "working");
     session.agent.send(text);
+
+    // Written to the transcript but not emitted: the sender already rendered
+    // it, and echoing would duplicate it on their screen.
+    void this.deps.store.appendEvent(id, { type: "user_msg", text }).catch(() => {});
   }
 
   approve(id: string, requestId: string, approved: boolean): void {

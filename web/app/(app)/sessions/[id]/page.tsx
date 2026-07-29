@@ -5,6 +5,7 @@ import { robotSessions, siteProfiles } from "@browserpilot/db";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { runtimeHttpUrl } from "@/lib/runtime";
+import { loadTranscript } from "@/lib/transcript";
 import { restartBrowser, stopSession } from "../actions";
 import { LiveSession } from "./live";
 import { SessionFiles } from "./files";
@@ -33,6 +34,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   if (user.role !== "ADMIN" && session.userId !== user.id) notFound();
 
   const finished = ["stopped", "failed", "interrupted"].includes(session.status);
+  const transcript = await loadTranscript(session.id);
 
   return (
     <div className="space-y-6">
@@ -96,6 +98,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           sessionId={session.id}
           runtimeHttpUrl={runtimeHttpUrl()}
           language={user.preferredLanguage}
+          initialItems={transcript}
         />
       )}
     </div>

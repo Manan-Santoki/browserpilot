@@ -10,6 +10,8 @@ export type SessionStatus =
 
 export type RobotEvent =
   | { type: "session_status"; status: SessionStatus; detail?: string }
+  /** What the user said. Stored so a reloaded page shows both sides. */
+  | { type: "user_msg"; text: string }
   | { type: "agent_text"; text: string }
   | { type: "tool_activity"; tool: string; summary: string }
   | { type: "approval_request"; requestId: string; tool: string; summary: string }
