@@ -29,6 +29,8 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
 
   const append = useCallback((item: ChatItem) => setItems((prev) => [...prev, item]), []);
 
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+
   useEffect(() => {
     let closed = false;
     let socket: WebSocket | undefined;
@@ -110,7 +112,9 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
             append({ kind: "error", text: msg.message });
             break;
           case "file_ready":
-            append({ kind: "file", filename: msg.filename, url: `${runtimeHttpUrl}${msg.url}` });
+            // msg.url is runtime-relative; the console proxies it so the link
+            // carries the user's cookie instead of needing a ticket.
+            append({ kind: "file", filename: msg.filename, url: msg.url });
             break;
           case "approval_request":
             append({ kind: "approval", requestId: msg.requestId, summary: msg.summary });
@@ -135,7 +139,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
       socket?.close();
       if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
     };
-  }, [sessionId, runtimeHttpUrl, append]);
+  }, [sessionId, runtimeHttpUrl, append, reconnectNonce]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -197,6 +201,19 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
             }`}
           />
           <span className="text-neutral-600 dark:text-neutral-300">{status}</span>
+
+          {!connected ? (
+            <button
+              type="button"
+              onClick={() => {
+                setStatus("connecting");
+                setReconnectNonce((n) => n + 1);
+              }}
+              className="ml-auto rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-900"
+            >
+              Reconnect
+            </button>
+          ) : null}
         </header>
 
         <div ref={logRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm">

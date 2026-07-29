@@ -49,7 +49,12 @@ describe("classifyToolUse", () => {
 
   test("unknown or non-browser tools require approval by default", () => {
     expect(classifyToolUse("Bash", { command: "ls" })).toBe("approve");
-    expect(classifyToolUse("mcp__playwright__browser_evaluate", { fn: "() => 1" })).toBe("approve");
+    expect(classifyToolUse("mcp__playwright__browser_install", {})).toBe("approve");
+  });
+
+  test("evaluate runs without approval, by explicit choice", () => {
+    // Gating it interrupted routine reads far more than it caught risk.
+    expect(classifyToolUse("mcp__playwright__browser_evaluate", { fn: "() => 1" })).toBe("auto");
   });
 
   test("missing or non-string element is handled without throwing", () => {

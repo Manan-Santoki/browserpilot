@@ -13,6 +13,12 @@ const AUTO_TOOLS = new Set([
   "mcp__playwright__browser_type",
   "mcp__playwright__browser_fill_form",
   "mcp__playwright__browser_click",
+  // Runs arbitrary JavaScript in the page. Allowed by choice: gating it
+  // interrupted routine reads (checking a value the snapshot did not expose)
+  // far more often than it caught anything risky. Destructive *clicks* are
+  // still gated by name, and every evaluate call is shown in the activity
+  // feed with its code, so it stays visible even though it is not blocked.
+  "mcp__playwright__browser_evaluate",
 ]);
 
 /**

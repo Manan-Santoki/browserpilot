@@ -68,10 +68,23 @@ export function listRuntimeSessions(user: CurrentUser) {
   return call<{ sessions: RuntimeSession[] }>(user, "/api/sessions");
 }
 
-export function startRuntimeSession(user: CurrentUser, siteProfileId: string, title?: string) {
+export function startRuntimeSession(
+  user: CurrentUser,
+  siteProfileId: string,
+  title?: string,
+  model?: string,
+) {
   return call<{ id: string }>(user, "/api/sessions", {
     method: "POST",
-    body: JSON.stringify({ siteProfileId, title }),
+    body: JSON.stringify({ siteProfileId, title, model }),
+  });
+}
+
+/** Replace a session's browser without ending the session. */
+export function restartRuntimeBrowser(user: CurrentUser, sessionId: string) {
+  return call<{ ok: boolean }>(user, `/api/sessions/${sessionId}/restart`, {
+    method: "POST",
+    sessionId,
   });
 }
 

@@ -2,10 +2,16 @@ import { and, eq } from "drizzle-orm";
 import { siteAccounts, siteProfiles } from "@browserpilot/db";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { deleteSite } from "./actions";
 import { AddSiteForm, LinkAccountForm } from "./forms";
 
-export default async function SitesPage() {
+export default async function SitesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const user = await requireUser();
+  const { error } = await searchParams;
 
   const sites = await db()
     .select({
@@ -33,6 +39,12 @@ export default async function SitesPage() {
         </p>
       </div>
 
+      {error === "running" ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          That site still has a browser running. Stop the session first, then delete it.
+        </p>
+      ) : null}
+
       {sites.length === 0 ? (
         <div className="rounded-lg border border-dashed border-neutral-300 px-6 py-12 text-center dark:border-neutral-700">
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
@@ -57,6 +69,18 @@ export default async function SitesPage() {
                   </span>
                 ) : null}
               </div>
+
+              {user.role === "ADMIN" ? (
+                <form action={deleteSite} className="mt-2">
+                  <input type="hidden" name="siteProfileId" value={site.id} />
+                  <button
+                    type="submit"
+                    className="text-sm text-red-600 underline-offset-4 hover:underline dark:text-red-400"
+                  >
+                    Delete site
+                  </button>
+                </form>
+              ) : null}
 
               {site.accountEmail ? (
                 <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">

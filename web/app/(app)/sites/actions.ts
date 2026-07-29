@@ -1,14 +1,59 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { encryptSecret } from "@browserpilot/core";
-import { siteAccounts, siteProfiles } from "@browserpilot/db";
+import { robotSessions, siteAccounts, siteProfiles } from "@browserpilot/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export type FormState = { error?: string; success?: string };
+
+/**
+ * Remove a site. Sessions reference it with ON DELETE SET NULL, so history is
+ * kept — a past session still shows what it did, just without a live link to
+ * the target. Running sessions are refused rather than orphaned.
+ */
+export async function deleteSite(formData: FormData): Promise<void> {
+  const admin = await requireAdmin();
+  const siteProfileId = String(formData.get("siteProfileId") ?? "");
+  if (!siteProfileId) return;
+
+  const live = await db()
+    .select({ id: robotSessions.id })
+    .from(robotSessions)
+    .where(
+      and(
+        eq(robotSessions.siteProfileId, siteProfileId),
+        inArray(robotSessions.status, ["starting", "idle", "working", "awaiting_approval"]),
+      ),
+    )
+    .limit(1);
+
+  if (live.length > 0) {
+    // Deleting under a running browser would leave it driving a target the
+    // console can no longer describe.
+    redirect("/sites?error=running");
+  }
+
+  const [removed] = await db()
+    .delete(siteProfiles)
+    .where(eq(siteProfiles.id, siteProfileId))
+    .returning({ name: siteProfiles.name });
+
+  await audit({
+    actorUserId: admin.id,
+    action: "site.deleted",
+    targetType: "site",
+    targetId: siteProfileId,
+    metadata: { name: removed?.name },
+  });
+
+  revalidatePath("/sites");
+  redirect("/sites");
+}
 
 function masterKey(): string {
   const key = process.env.BP_MASTER_KEY;

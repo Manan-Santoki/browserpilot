@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
-import { startRuntimeSession, stopRuntimeSession } from "@/lib/runtime";
+import { restartRuntimeBrowser, startRuntimeSession, stopRuntimeSession } from "@/lib/runtime";
 
 export type StartState = { error?: string };
 
@@ -13,9 +13,15 @@ export async function startSession(_prev: StartState, formData: FormData): Promi
 
   const siteProfileId = String(formData.get("siteProfileId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
+  const model = String(formData.get("model") ?? "").trim();
   if (!siteProfileId) return { error: "Choose a site first." };
 
-  const result = await startRuntimeSession(user, siteProfileId, title || undefined);
+  const result = await startRuntimeSession(
+    user,
+    siteProfileId,
+    title || undefined,
+    model || undefined,
+  );
   if (!result.ok) return { error: result.error };
 
   await audit({
@@ -23,7 +29,7 @@ export async function startSession(_prev: StartState, formData: FormData): Promi
     action: "session.started",
     targetType: "session",
     targetId: result.data.id,
-    metadata: { siteProfileId },
+    metadata: { siteProfileId, model: model || "default" },
   });
 
   redirect(`/sessions/${result.data.id}`);
@@ -45,5 +51,14 @@ export async function stopSession(formData: FormData): Promise<void> {
   }
 
   revalidatePath("/");
+  revalidatePath(`/sessions/${sessionId}`);
+}
+
+export async function restartBrowser(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const sessionId = String(formData.get("sessionId") ?? "");
+  if (!sessionId) return;
+
+  await restartRuntimeBrowser(user, sessionId);
   revalidatePath(`/sessions/${sessionId}`);
 }

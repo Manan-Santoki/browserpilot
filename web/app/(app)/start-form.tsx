@@ -35,6 +35,19 @@ export function StartSessionForm({ sites }: { sites: Array<{ id: string; name: s
         ))}
       </select>
 
+      <select
+        name="model"
+        aria-label="Model"
+        defaultValue=""
+        title="Which model drives this session"
+        className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+      >
+        <option value="">Default model</option>
+        <option value="claude-opus-5">Opus 5 — most capable</option>
+        <option value="claude-sonnet-5">Sonnet 5 — faster, cheaper</option>
+        <option value="claude-haiku-4-5">Haiku 4.5 — fastest</option>
+      </select>
+
       <input
         name="title"
         placeholder="What is this for? (optional)"
