@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PushToTalk } from "./push-to-talk";
 
 type ChatItem =
   | { kind: "you"; text: string }
@@ -11,9 +12,9 @@ type ChatItem =
   | { kind: "file"; filename: string; url: string }
   | { kind: "approval"; requestId: string; summary: string; resolved?: "approved" | "denied" };
 
-type Props = { sessionId: string; runtimeHttpUrl: string };
+type Props = { sessionId: string; runtimeHttpUrl: string; language: string };
 
-export function LiveSession({ sessionId, runtimeHttpUrl }: Props) {
+export function LiveSession({ sessionId, runtimeHttpUrl, language }: Props) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState("connecting");
   const [connected, setConnected] = useState(false);
@@ -238,6 +239,11 @@ export function LiveSession({ sessionId, runtimeHttpUrl }: Props) {
         </div>
 
         <form onSubmit={send} className="flex gap-2 border-t border-neutral-200 p-3 dark:border-neutral-800">
+          <PushToTalk
+            language={language}
+            disabled={!connected}
+            onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))}
+          />
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

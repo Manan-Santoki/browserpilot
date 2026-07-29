@@ -76,7 +76,11 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           </p>
         </div>
       ) : (
-        <LiveSession sessionId={session.id} runtimeHttpUrl={runtimeHttpUrl()} />
+        <LiveSession
+          sessionId={session.id}
+          runtimeHttpUrl={runtimeHttpUrl()}
+          language={user.preferredLanguage}
+        />
       )}
     </div>
   );
