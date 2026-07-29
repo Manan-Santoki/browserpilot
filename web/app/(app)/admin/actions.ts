@@ -2,7 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { generateToken } from "@browserpilot/core";
+import { encryptSecret, generateToken } from "@browserpilot/core";
 import { invites, settings, users } from "@browserpilot/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
@@ -138,4 +138,95 @@ export async function saveSettings(_prev: AdminState, formData: FormData): Promi
 
   revalidatePath("/admin/settings");
   return { success: "Saved. New sessions use these limits immediately." };
+}
+
+/**
+ * Where downloads are kept.
+ *
+ * The deployment supplies a bucket through the environment, which is how the
+ * bundled MinIO is wired up; this is how an administrator points the whole
+ * thing somewhere else instead. The secret key is sealed with the same master
+ * key as a site's signing secret and never read back out to the browser — an
+ * empty field means "leave the stored one alone", not "clear it".
+ */
+export async function saveStorageSettings(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const admin = await requireAdmin();
+
+  const driver = String(formData.get("storageDriver") ?? "s3");
+  const endpoint = String(formData.get("s3Endpoint") ?? "").trim();
+  const region = String(formData.get("s3Region") ?? "").trim();
+  const bucket = String(formData.get("s3Bucket") ?? "").trim();
+  const accessKeyId = String(formData.get("s3AccessKeyId") ?? "").trim();
+  const secret = String(formData.get("s3SecretAccessKey") ?? "");
+  const pathStyle = formData.get("s3ForcePathStyle") !== null;
+
+  if (driver === "s3") {
+    if (!bucket || !accessKeyId) {
+      return { error: "A bucket and an access key are both required to use object storage." };
+    }
+    if (endpoint) {
+      try {
+        new URL(endpoint);
+      } catch {
+        return { error: "That endpoint does not look like a URL." };
+      }
+    }
+
+    const [existing] = await db()
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "s3SecretAccessKey"))
+      .limit(1);
+
+    if (!secret && !existing) {
+      return { error: "A secret access key is required the first time." };
+    }
+  }
+
+  const writes: Array<{ key: string; value: unknown }> = [
+    { key: "storageDriver", value: driver },
+    { key: "s3Endpoint", value: endpoint },
+    { key: "s3Region", value: region },
+    { key: "s3Bucket", value: bucket },
+    { key: "s3AccessKeyId", value: accessKeyId },
+    { key: "s3ForcePathStyle", value: pathStyle },
+  ];
+
+  // Sealed before it touches the table, like every other secret here.
+  if (secret) {
+    writes.push({ key: "s3SecretAccessKey", value: encryptSecret(secret, masterKey()) });
+  }
+
+  for (const write of writes) {
+    await db()
+      .insert(settings)
+      .values({ key: write.key, value: write.value, updatedById: admin.id })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: write.value, updatedById: admin.id, updatedAt: new Date() },
+      });
+  }
+
+  await audit({
+    actorUserId: admin.id,
+    action: "settings.updated",
+    metadata: { storageDriver: driver, s3Bucket: bucket, s3Endpoint: endpoint },
+  });
+
+  revalidatePath("/admin/storage");
+  return {
+    success:
+      driver === "s3"
+        ? `Saved. New downloads go to ${bucket}.`
+        : "Saved. New downloads are kept on the server's disk.",
+  };
+}
+
+function masterKey(): string {
+  const key = process.env.BP_MASTER_KEY;
+  if (!key) throw new Error("BP_MASTER_KEY is required");
+  return key;
 }

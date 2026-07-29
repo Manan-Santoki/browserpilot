@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { count, eq, inArray } from "drizzle-orm";
-import { auditLogs, robotSessions, siteProfiles, users } from "@browserpilot/db";
+import { auditLogs, robotSessions, settings, siteProfiles, users } from "@browserpilot/db";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
@@ -17,10 +17,30 @@ export default async function AdminPage() {
     db().select({ n: count() }).from(auditLogs),
   ]);
 
+  // What the console can say about storage without unsealing anything.
+  const [driverRow] = await db()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, "storageDriver"))
+    .limit(1);
+  const [bucketRow] = await db()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, "s3Bucket"))
+    .limit(1);
+
+  const storageLabel =
+    driverRow?.value === "local"
+      ? "this server's disk"
+      : typeof bucketRow?.value === "string" && bucketRow.value
+        ? String(bucketRow.value)
+        : "the bundled bucket";
+
   const cards = [
     { href: "/admin/users", title: "Users", value: `${activeUsers?.n ?? 0} active of ${userCount?.n ?? 0}`, blurb: "Invite people, change roles, deactivate accounts." },
     { href: "/sites", title: "Sites", value: `${siteCount?.n ?? 0} registered`, blurb: "Applications the robot can drive." },
     { href: "/admin/settings", title: "Limits", value: `${liveSessions?.n ?? 0} browsers running`, blurb: "Concurrency caps, timeouts, and the default model." },
+    { href: "/admin/storage", title: "Storage", value: storageLabel, blurb: "Where downloaded files are kept." },
     { href: "/admin/audit", title: "Audit log", value: `${auditCount?.n ?? 0} entries`, blurb: "Who did what, and when." },
   ];
 
