@@ -82,11 +82,17 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         const body = (await req.json().catch(() => ({}))) as {
           siteProfileId?: string;
           title?: string;
+          model?: string;
         };
         if (!body.siteProfileId) return json({ error: "siteProfileId is required" }, 400);
 
         try {
-          const id = await manager.create(claims.userId, body.siteProfileId, body.title);
+          const id = await manager.create(
+            claims.userId,
+            body.siteProfileId,
+            body.title,
+            body.model,
+          );
           return json({ id });
         } catch (error) {
           if (error instanceof SessionError) {
@@ -119,6 +125,24 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         }
         await manager.stop(session.id);
         return json({ ok: true });
+      }
+
+      const restartMatch = /^\/api\/sessions\/([^/]+)\/restart$/.exec(path);
+      if (restartMatch && req.method === "POST") {
+        const session = manager.get(restartMatch[1]!);
+        if (!session) return json({ error: "No such session" }, 404);
+        if (!manager.canAccess(session, claims.userId, claims.role)) {
+          return json({ error: "Not your session" }, 403);
+        }
+        try {
+          await manager.restartBrowser(session.id);
+          return json({ ok: true });
+        } catch (error) {
+          if (error instanceof SessionError) {
+            return json({ error: error.message, code: error.code }, STATUS_FOR[error.code]);
+          }
+          return json({ error: (error as Error).message }, 500);
+        }
       }
 
       const fileMatch = /^\/api\/sessions\/([^/]+)\/files\/(.+)$/.exec(path);

@@ -44,6 +44,7 @@ export type ManagerConfig = {
 export type Session = {
   id: string;
   userId: string;
+  siteProfileId: string;
   siteName: string;
   status: SessionStatus;
   startedAt: number;
@@ -88,7 +89,12 @@ export class SessionManager {
    * assume, the concurrency policy — is resolved from the database, so adding a
    * site or raising a limit never requires a redeploy.
    */
-  async create(userId: string, siteProfileId: string, title?: string): Promise<string> {
+  async create(
+    userId: string,
+    siteProfileId: string,
+    title?: string,
+    model?: string,
+  ): Promise<string> {
     const { store } = this.deps;
 
     const owner = await store.owner(userId);
@@ -149,7 +155,49 @@ export class SessionManager {
       throw error;
     }
 
+    this.attachDownloads(id, browser, downloadsDir);
+
+    let agent: AgentRunner;
+    try {
+      agent = await this.deps.startAgent({
+        cdpEndpoint: browser.cdpEndpoint,
+        site,
+        // A per-session choice wins over the configured default; running
+        // sessions keep whatever they started with.
+        model: model?.trim() || settings.defaultModel,
+        env: this.config.env,
+        nodeBin: this.config.nodeBin,
+        onEvent: (event) => this.handleEvent(id, event),
+      });
+    } catch (error) {
+      await browser.close().catch(() => {});
+      await store.setStatus(id, "failed", `agent start failed: ${(error as Error).message}`);
+      throw error;
+    }
+
+    const now = this.deps.now();
+    this.sessions.set(id, {
+      id,
+      userId,
+      siteProfileId,
+      siteName: site.name,
+      status: "idle",
+      startedAt: now,
+      lastActivityAt: now,
+      previewEnabled: false,
+      browser,
+      agent,
+      listeners: new Set(),
+      frameListeners: new Set(),
+    });
+
+    await store.setStatus(id, "idle");
+    return id;
+  }
+
+  private attachDownloads(id: string, browser: RobotBrowser, downloadsDir: string): void {
     browser.onDownload((download) => {
+      // basename() prevents a hostile suggested filename from escaping the dir.
       const filename = basename(download.suggestedFilename) || "download";
       void download
         .saveAs(join(downloadsDir, filename))
@@ -165,40 +213,6 @@ export class SessionManager {
           this.handleEvent(id, { type: "error", message: `Download failed: ${error.message}` }),
         );
     });
-
-    let agent: AgentRunner;
-    try {
-      agent = await this.deps.startAgent({
-        cdpEndpoint: browser.cdpEndpoint,
-        site,
-        model: settings.defaultModel,
-        env: this.config.env,
-        nodeBin: this.config.nodeBin,
-        onEvent: (event) => this.handleEvent(id, event),
-      });
-    } catch (error) {
-      await browser.close().catch(() => {});
-      await store.setStatus(id, "failed", `agent start failed: ${(error as Error).message}`);
-      throw error;
-    }
-
-    const now = this.deps.now();
-    this.sessions.set(id, {
-      id,
-      userId,
-      siteName: site.name,
-      status: "idle",
-      startedAt: now,
-      lastActivityAt: now,
-      previewEnabled: false,
-      browser,
-      agent,
-      listeners: new Set(),
-      frameListeners: new Set(),
-    });
-
-    await store.setStatus(id, "idle");
-    return id;
   }
 
   get(id: string): Session | undefined {
@@ -257,6 +271,58 @@ export class SessionManager {
       await session.screencast?.stop().catch(() => {});
       session.screencast = undefined;
     }
+  }
+
+  /**
+   * Replace a session's browser without ending the session.
+   *
+   * The agent keeps its conversation, but everything it had on screen is gone —
+   * it lands back on the target's home page, freshly authenticated. Use when a
+   * page has wedged or the browser has drifted somewhere unrecoverable.
+   */
+  async restartBrowser(id: string): Promise<void> {
+    const session = this.require(id);
+    const site = await this.deps.store.site(session.siteProfileId);
+    if (!site) throw new SessionError("The site is no longer available", "unknown_site");
+
+    const account = await this.deps.store.siteAccount(session.userId, session.siteProfileId);
+    if (!account) throw new SessionError("You have no account on this site", "no_site_account");
+
+    const wasPreviewing = session.previewEnabled;
+    await session.screencast?.stop().catch(() => {});
+    session.screencast = undefined;
+    session.previewEnabled = false;
+
+    const old = session.browser;
+    session.browser = await this.deps.launchBrowser({
+      targetUrl: site.baseUrl,
+      user: {
+        userId: account.targetUserId,
+        email: account.targetEmail,
+        name: account.targetName,
+        role: account.targetRole,
+      },
+      sessionSecret: site.secret ?? "",
+      cookieName: site.cookieName,
+      downloadsDir: join(this.config.downloadsRoot, id),
+    });
+    await old.close().catch(() => {});
+
+    this.attachDownloads(id, session.browser, join(this.config.downloadsRoot, id));
+
+    // The agent still holds tools pointed at the old browser's debugging port,
+    // so it must be told rather than left to discover the failure mid-task.
+    session.agent.send(
+      "Your browser was restarted and is back on the home page. Anything you had open is gone — take a fresh snapshot before continuing.",
+    );
+
+    this.handleEvent(id, {
+      type: "tool_activity",
+      tool: "browser_restart",
+      summary: "Browser restarted — back on the home page",
+    });
+
+    if (wasPreviewing) await this.setPreview(id, true);
   }
 
   async stop(id: string, reason = "stopped by user"): Promise<void> {

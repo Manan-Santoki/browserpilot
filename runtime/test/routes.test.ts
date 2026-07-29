@@ -234,3 +234,56 @@ describe("WebSocket", () => {
     expect(closed).toBe(true);
   });
 });
+
+describe("restarting a browser", () => {
+  test("replaces the browser without ending the session", async () => {
+    const { port, manager, state } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+    const before = manager.get(id)!.browser;
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/restart`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.userId)}` },
+    });
+
+    expect(res.status).toBe(200);
+    // The session survives; only its browser is new.
+    expect(manager.get(id)).toBeDefined();
+    expect(manager.get(id)!.browser).not.toBe(before);
+    expect(state.closed.browser).toBe(1);
+    // The agent is told, rather than left holding tools for a dead browser.
+    expect(state.sent.some((m) => /restarted/i.test(m))).toBe(true);
+
+    await manager.stop(id);
+  });
+
+  test("another user cannot restart your browser", async () => {
+    const { port, manager } = start();
+    const id = await manager.create(fx.userId, fx.siteId);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/restart`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ticketFor(id, fx.otherUserId)}` },
+    });
+
+    expect(res.status).toBe(403);
+    await manager.stop(id);
+  });
+});
+
+describe("model selection", () => {
+  test("a per-session model overrides the configured default", async () => {
+    const { port, manager } = start();
+    const ticket = await ticketFor("pending", fx.userId);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({ siteProfileId: fx.siteId, model: "claude-sonnet-5" }),
+    });
+
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    await manager.stop(id);
+  });
+});

@@ -282,3 +282,79 @@ describe("startAgent", () => {
     await runner.stop();
   });
 });
+
+describe("approval summaries", () => {
+  test("arbitrary code is shown, not hidden behind the tool name", async () => {
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    const canUseTool = fake.captured.options!.canUseTool!;
+    void canUseTool(
+      "mcp__playwright__browser_evaluate",
+      { function: "() => document.documentElement.className" },
+      permissionOptions(),
+    );
+    await Bun.sleep(20);
+
+    const request = events.find((e) => e.type === "approval_request");
+    if (request?.type !== "approval_request") throw new Error("no approval requested");
+    // Someone approving must be able to see what would run.
+    expect(request.summary).toContain("document.documentElement.className");
+
+    runner.approve(request.requestId, false);
+    await runner.stop();
+  });
+
+  test("long code is truncated rather than flooding the card", async () => {
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    const canUseTool = fake.captured.options!.canUseTool!;
+    void canUseTool(
+      "mcp__playwright__browser_evaluate",
+      { function: `() => { ${"const x = 1; ".repeat(60)} }` },
+      permissionOptions(),
+    );
+    await Bun.sleep(20);
+
+    const request = events.find((e) => e.type === "approval_request");
+    if (request?.type !== "approval_request") throw new Error("no approval requested");
+    expect(request.summary.length).toBeLessThan(200);
+    expect(request.summary).toEndWith("…");
+
+    runner.approve(request.requestId, false);
+    await runner.stop();
+  });
+
+  test("a click still names the element it targets", async () => {
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    const canUseTool = fake.captured.options!.canUseTool!;
+    void canUseTool(
+      "mcp__playwright__browser_click",
+      { element: "Delete purchase order" },
+      permissionOptions(),
+    );
+    await Bun.sleep(20);
+
+    const request = events.find((e) => e.type === "approval_request");
+    if (request?.type !== "approval_request") throw new Error("no approval requested");
+    expect(request.summary).toContain("Delete purchase order");
+
+    runner.approve(request.requestId, false);
+    await runner.stop();
+  });
+});

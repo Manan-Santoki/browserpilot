@@ -103,13 +103,40 @@ function shortToolName(name: string): string {
   return name.replace(/^mcp__playwright__/, "");
 }
 
+/**
+ * A one-line description of what a tool call will actually do.
+ *
+ * This is the entire basis on which someone approves or denies, so it has to
+ * carry the specifics. An approval card reading only "browser_evaluate" asks
+ * the user to vouch for code they cannot see, which teaches them to approve
+ * reflexively — worse than not asking at all.
+ */
 function summarize(toolName: string, input: Record<string, unknown>): string {
   const short = shortToolName(toolName);
-  const target = typeof input.element === "string" ? input.element : undefined;
+
+  // Arbitrary code: show it, trimmed to one readable line.
+  const code = ["function", "fn", "expression", "script", "pageFunction"]
+    .map((key) => input[key])
+    .find((value): value is string => typeof value === "string");
+  if (code) {
+    const flattened = code.replace(/\s+/g, " ").trim();
+    return `${short}: ${flattened.length > 160 ? `${flattened.slice(0, 157)}…` : flattened}`;
+  }
+
   const url = typeof input.url === "string" ? input.url : undefined;
   if (url) return `${short}: ${url}`;
+
+  const target = typeof input.element === "string" ? input.element : undefined;
+  const text = typeof input.text === "string" ? input.text : undefined;
+  if (target && text) return `${short}: ${target} — "${text.slice(0, 60)}"`;
   if (target) return `${short}: ${target}`;
-  return short;
+
+  // Anything else: show whatever scalar arguments it carries.
+  const scalars = Object.entries(input)
+    .filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+    .slice(0, 3);
+  return scalars.length > 0 ? `${short}: ${scalars.join(", ")}` : short;
 }
 
 export async function startAgent(
