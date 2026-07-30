@@ -106,6 +106,14 @@ describe("buildSystemPrompt", () => {
     expect(buildSystemPrompt(SITE)).toContain("Purchase orders live at /purchase-orders.");
   });
 
+  test("uses structured choices and stops after a successful download", () => {
+    const prompt = buildSystemPrompt(SITE);
+    expect(prompt).toContain("ask_user_choice");
+    expect(prompt).toContain("exact option labels and values");
+    expect(prompt).toContain("Do not reopen or screenshot a downloaded PDF");
+    expect(prompt).toContain("merely to reconfirm a successful download");
+  });
+
   test("omits the notes section entirely when there are none", () => {
     const prompt = buildSystemPrompt({ ...SITE, systemPromptNotes: null });
     expect(prompt).not.toContain("About this application");
@@ -119,13 +127,13 @@ describe("buildSystemPrompt", () => {
 });
 
 describe("startAgent", () => {
-  test("wires Playwright MCP to the session's CDP endpoint and nothing else", async () => {
+  test("wires Playwright plus the BrowserPilot choice tool, and no host tools", async () => {
     const fake = fakeQuery();
     const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
 
     const mcp = fake.captured.options!.mcpServers as Record<
       string,
-      { command: string; args: string[] }
+      { command?: string; args?: string[]; type?: string }
     >;
     expect(mcp.playwright!.args).toContain("--cdp-endpoint");
     expect(mcp.playwright!.args).toContain(OPTS.cdpEndpoint);
@@ -134,8 +142,9 @@ describe("startAgent", () => {
     expect(mcp.playwright!.command).toBe("node");
     // Resolved from our own node_modules — never npx, which on some machines
     // resolves to a different platform's binary and needs a network fetch.
-    expect(mcp.playwright!.args[0]).toMatch(/@playwright[/\\]mcp[/\\]cli\.js$/);
+    expect(mcp.playwright!.args![0]).toMatch(/@playwright[/\\]mcp[/\\]cli\.js$/);
     expect(mcp.playwright!.args).not.toContain("-y");
+    expect(mcp.browserpilot!.type).toBe("sdk");
     expect(fake.captured.options!.strictMcpConfig).toBe(true);
     // No built-in Claude Code tools: the browser is the agent's whole world.
     expect(fake.captured.options!.tools).toEqual([]);

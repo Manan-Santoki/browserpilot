@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { Separator } from "@/components/ui/separator";
+import { AppNavLink } from "@/components/app-nav-link";
 import { logout } from "./actions";
 
 const NAV = [
@@ -30,24 +31,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
         <nav className="flex flex-1 flex-col gap-0.5 p-3">
           {NAV.map((item) => (
-            <Link
+            <AppNavLink
               key={item.href}
               href={item.href}
               className="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-3 py-2 text-sm transition-colors"
             >
               {item.label}
-            </Link>
+            </AppNavLink>
           ))}
 
           {user.role === "ADMIN" ? (
             <>
               <Separator className="my-2" />
-              <Link
+              <AppNavLink
                 href="/admin"
                 className="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-3 py-2 text-sm transition-colors"
               >
                 Admin
-              </Link>
+              </AppNavLink>
             </>
           ) : null}
         </nav>
@@ -55,7 +56,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Separator />
 
         <div className="p-3">
-          <Link
+          <AppNavLink
             href="/account"
             className="hover:bg-accent block rounded-md px-3 py-2 transition-colors"
           >
@@ -63,7 +64,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <span className="text-muted-foreground block truncate text-xs">
               {user.role === "ADMIN" ? "Administrator" : "User"}
             </span>
-          </Link>
+          </AppNavLink>
           <form action={logout}>
             <button
               type="submit"
@@ -83,12 +84,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <nav className="text-muted-foreground flex gap-3 overflow-x-auto text-sm">
             {NAV.map((item) => (
-              <Link key={item.href} href={item.href} className="whitespace-nowrap">
+              <AppNavLink
+                key={item.href}
+                href={item.href}
+                className="whitespace-nowrap"
+                activeClassName="text-foreground font-medium"
+              >
                 {item.label}
-              </Link>
+              </AppNavLink>
             ))}
-            {user.role === "ADMIN" ? <Link href="/admin">Admin</Link> : null}
-            <Link href="/account">Account</Link>
+            {user.role === "ADMIN" ? (
+              <AppNavLink href="/admin" activeClassName="text-foreground font-medium">
+                Admin
+              </AppNavLink>
+            ) : null}
+            <AppNavLink href="/account" activeClassName="text-foreground font-medium">
+              Account
+            </AppNavLink>
           </nav>
         </header>
 

@@ -159,6 +159,10 @@
   .lamp-idle {
     background: var(--muted-foreground);
   }
+  .lamp-ready {
+    background: var(--running);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--running) 16%, transparent);
+  }
   .lamp-off {
     background: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
   }

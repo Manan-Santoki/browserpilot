@@ -173,7 +173,9 @@ export function describeStatus(status: string, live?: boolean): { label: string;
   if (status === "awaiting_approval") return { label: "needs you", tint: colour.signal };
   if (status === "working") return { label: "working", tint: colour.running };
   if (status === "starting") return { label: "starting", tint: colour.running };
-  if (status === "idle") return { label: live ? "ready" : "idle", tint: colour.textMuted };
+  if (status === "idle") {
+    return { label: live ? "ready" : "idle", tint: live ? colour.running : colour.textMuted };
+  }
   if (status === "failed") return { label: "failed", tint: colour.danger };
   if (status === "interrupted") return { label: "interrupted", tint: colour.textFaint };
   return { label: "stopped", tint: colour.textFaint };

@@ -1,16 +1,26 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
+import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { createPairingCode, type PairingState } from "./actions";
 
+type PairingStatus = {
+  status: "pending" | "connected" | "expired";
+  deviceName?: string;
+};
+
 export function PairingPanel() {
+  const router = useRouter();
   const [state, setState] = useState<PairingState | null>(null);
+  const [pairingStatus, setPairingStatus] = useState<PairingStatus | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [pending, setPending] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const refreshedCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!state?.code || !canvasRef.current) return;
@@ -38,16 +48,65 @@ export function PairingPanel() {
     return () => clearInterval(timer);
   }, [state?.expiresAt]);
 
+  useEffect(() => {
+    const code = state?.code;
+    if (!code) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/pair/status?code=${encodeURIComponent(code)}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("Could not check the pairing code");
+
+        const next = (await res.json()) as PairingStatus;
+        if (cancelled) return;
+        setPairingStatus(next);
+
+        if (next.status === "connected") {
+          if (refreshedCodeRef.current !== code) {
+            refreshedCodeRef.current = code;
+            router.refresh();
+          }
+          return;
+        }
+        if (next.status === "expired") return;
+      } catch {
+        // A transient polling failure should not invalidate a code that may
+        // still be visible and usable. Try again until its own timer expires.
+      }
+
+      if (!cancelled) timer = setTimeout(poll, 1_000);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [router, state?.code]);
+
   const generate = async () => {
     setPending(true);
+    setPairingStatus(null);
+    refreshedCodeRef.current = null;
     try {
-      setState(await createPairingCode());
+      const next = await createPairingCode();
+      setState(next);
+      setPairingStatus(next.code ? { status: "pending" } : null);
     } finally {
       setPending(false);
     }
   };
 
-  const expired = state?.code && secondsLeft === 0;
+  const connected = pairingStatus?.status === "connected";
+  const expired =
+    state?.code &&
+    !connected &&
+    (secondsLeft === 0 || pairingStatus?.status === "expired");
 
   return (
     <Card className="p-5">
@@ -60,6 +119,18 @@ export function PairingPanel() {
           <Button onClick={generate} disabled={pending}>
             {pending ? "Generating…" : "Show pairing code"}
           </Button>
+        </div>
+      ) : connected ? (
+        <div className="flex items-center gap-3 py-2">
+          <CheckCircle2 className="size-8 text-emerald-500" aria-hidden />
+          <div>
+            <p className="font-medium">Device connected</p>
+            <p className="text-muted-foreground text-sm">
+              {pairingStatus.deviceName
+                ? `${pairingStatus.deviceName} can now reach your BrowserPilot sessions.`
+                : "This device can now reach your BrowserPilot sessions."}
+            </p>
+          </div>
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-6">

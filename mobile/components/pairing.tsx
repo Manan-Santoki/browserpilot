@@ -4,6 +4,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DEFAULT_CONSOLE_URL, consoleUrl, pair, setConsoleUrl } from "../lib/api";
+import { parsePairingCode } from "../lib/pairing-code";
 import { colour, radius, space, type } from "../lib/theme";
 import { Button, Field, Loading, Notice } from "./ui";
 
@@ -30,8 +31,10 @@ export function PairingScreen({ onPaired }: { onPaired: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      if (url.trim()) await setConsoleUrl(url.trim());
-      await pair(value.trim().toUpperCase(), deviceName);
+      const pairing = parsePairingCode(value);
+      const targetConsole = pairing.consoleUrl ?? url.trim();
+      if (targetConsole) await setConsoleUrl(targetConsole);
+      await pair(pairing.code, deviceName);
       onPaired();
     } catch (e) {
       setError((e as Error).message);

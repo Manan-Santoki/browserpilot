@@ -205,6 +205,7 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
       return {
         send: (t: string) => state.sent.push(t),
         approve: () => {},
+        choose: () => {},
         stop: async () => {
           state.closed.agent++;
         },

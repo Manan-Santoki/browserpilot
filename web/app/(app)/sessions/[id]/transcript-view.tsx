@@ -69,6 +69,16 @@ export function TranscriptView({ items }: { items: ChatItem[] }) {
             </a>
           );
         }
+        if (item.kind === "choice") {
+          return (
+            <div key={i} className="border-signal/30 bg-signal/5 rounded-lg border px-3 py-2.5">
+              <p className="text-foreground">{item.question}</p>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {item.resolved ? `Selected: ${item.resolved.label}` : "No option was selected."}
+              </p>
+            </div>
+          );
+        }
         return (
           <p key={i} className="text-signal font-mono text-xs">
             {item.summary} — {item.resolved ?? "never answered"}

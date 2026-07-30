@@ -1,5 +1,6 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colour } from "../../lib/theme";
 
 /**
@@ -8,6 +9,8 @@ import { colour } from "../../lib/theme";
  * session — is a push, because it is a place you come back from.
  */
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -20,12 +23,16 @@ export default function TabsLayout() {
           backgroundColor: colour.card,
           borderTopColor: colour.border,
           paddingTop: 6,
-          height: 88,
+          paddingBottom: insets.bottom,
+          height: 64 + insets.bottom,
         },
         tabBarActiveTintColor: colour.signal,
         tabBarInactiveTintColor: colour.textFaint,
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-        sceneStyle: { backgroundColor: colour.background },
+        sceneStyle: {
+          backgroundColor: colour.background,
+          paddingTop: insets.top,
+        },
       }}
     >
       <Tabs.Screen

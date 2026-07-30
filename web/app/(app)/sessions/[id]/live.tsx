@@ -145,6 +145,26 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
               ),
             );
             break;
+          case "choice_request":
+            append({
+              kind: "choice",
+              requestId: msg.requestId,
+              question: msg.question,
+              options: msg.options,
+            });
+            break;
+          case "choice_resolved":
+            setItems((prev) =>
+              prev.map((item) =>
+                item.kind === "choice" && item.requestId === msg.requestId
+                  ? {
+                      ...item,
+                      resolved: { value: msg.value, label: msg.label },
+                    }
+                  : item,
+              ),
+            );
+            break;
         }
       };
     }
@@ -172,6 +192,10 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
 
   const respond = (requestId: string, approved: boolean) => {
     wsRef.current?.send(JSON.stringify({ type: "approval", requestId, approved }));
+  };
+
+  const choose = (requestId: string, value: string) => {
+    wsRef.current?.send(JSON.stringify({ type: "choice", requestId, value }));
   };
 
   // Identity-stable, so resizing does not tear down the observer each render.
@@ -255,7 +279,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
         }`}
       >
         <header className="flex items-center gap-2 border-b px-4 py-2.5">
-          <StatusLabel status={connected ? status : "disconnected"} />
+          <StatusLabel status={connected ? status : "disconnected"} live={connected} />
           {!connected ? (
             <Button
               size="sm"
@@ -334,6 +358,50 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
                     {item.filename}
                   </a>
                 </p>
+              );
+            }
+            if (item.kind === "choice") {
+              const selected = item.resolved
+                ? item.options.find((option) => option.value === item.resolved?.value)
+                : undefined;
+              return (
+                <div
+                  key={i}
+                  className="border-signal/40 bg-signal/5 rounded-lg border px-3 py-3"
+                >
+                  <p className="text-signal text-xs font-medium tracking-wide uppercase">
+                    Choose one
+                  </p>
+                  <p className="text-foreground mt-1.5 text-sm">{item.question}</p>
+                  <select
+                    aria-label={item.question}
+                    value={item.resolved?.value ?? ""}
+                    disabled={Boolean(item.resolved) || !connected}
+                    onChange={(event) => {
+                      if (event.target.value) choose(item.requestId, event.target.value);
+                    }}
+                    className="border-input bg-background text-foreground mt-3 h-9 w-full rounded-md border px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <option value="" disabled>
+                      Select an option…
+                    </option>
+                    {item.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {selected?.description ? (
+                    <p className="text-muted-foreground mt-2 text-xs">
+                      {selected.description}
+                    </p>
+                  ) : null}
+                  {item.resolved ? (
+                    <p className="text-muted-foreground mt-2 text-xs">
+                      Selected: {item.resolved.label}
+                    </p>
+                  ) : null}
+                </div>
               );
             }
             return (
