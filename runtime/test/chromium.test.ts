@@ -66,4 +66,27 @@ describe("launchRobotBrowser", () => {
   test("reports the downloads directory it was given", () => {
     expect(browser.downloadsDir).toBe(downloadsDir);
   });
+
+  test("reports a process-level browser disconnect exactly once", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "bp-disconnect-"));
+    const victim = await launchRobotBrowser({
+      targetUrl: `http://127.0.0.1:${server.port}`,
+      downloadsDir,
+      profileDir,
+    });
+    let notifications = 0;
+    const disconnected = new Promise<void>((resolve) => {
+      victim.onClose(() => {
+        notifications += 1;
+        resolve();
+      });
+    });
+
+    await victim.context.browser()!.close();
+    await disconnected;
+    await Bun.sleep(20);
+
+    expect(notifications).toBe(1);
+    await rm(profileDir, { recursive: true, force: true });
+  }, 60_000);
 });

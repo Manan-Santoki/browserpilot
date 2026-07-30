@@ -99,6 +99,14 @@ export type Session = {
   lastActivityAt: number;
   previewEnabled: boolean;
   browser: RobotBrowser;
+  /** The model is fixed for the lifetime of an agent session. */
+  model?: string;
+  /** Most recent request, used once if an in-progress browser must be recovered. */
+  lastUserMessage?: string;
+  /** Prevents an intentional close during replacement from starting another replacement. */
+  restartingBrowser?: boolean;
+  /** Caps automatic recovery so a broken host cannot spin Chromium forever. */
+  automaticBrowserRestarts?: number;
   /** Absent on a login session — nobody is instructing this browser. */
   agent?: AgentRunner;
   /** Present on a login session, which takes clicks and keystrokes. */
@@ -149,6 +157,16 @@ export class SessionManager {
     private config: ManagerConfig,
     private deps: ManagerDeps,
   ) {}
+
+  /** One transient Chromium spawn failure should not fail the whole session. */
+  private async launchBrowserWithRetry(args: LaunchArgs): Promise<RobotBrowser> {
+    try {
+      return await this.deps.launchBrowser(args);
+    } catch {
+      await Bun.sleep(250);
+      return this.deps.launchBrowser(args);
+    }
+  }
 
   /**
    * Start a browser for `userId` against `siteProfileId`.
@@ -235,7 +253,7 @@ export class SessionManager {
 
     let browser: RobotBrowser;
     try {
-      browser = await this.deps.launchBrowser({
+      browser = await this.launchBrowserWithRetry({
         targetUrl: site.baseUrl,
         // The identity the target expects, not BrowserPilot's own user id.
         // A saved login already carries one, so nothing is minted for it.
@@ -273,8 +291,7 @@ export class SessionManager {
       );
     }
 
-    this.attachDownloads(id, browser, downloadsDir);
-
+    const selectedModel = model?.trim() || settings.defaultModel;
     let agent: AgentRunner;
     try {
       agent = await this.deps.startAgent({
@@ -282,7 +299,7 @@ export class SessionManager {
         site,
         // A per-session choice wins over the configured default; running
         // sessions keep whatever they started with.
-        model: model?.trim() || settings.defaultModel,
+        model: selectedModel,
         env: this.config.env,
         nodeBin: this.config.nodeBin,
         sessionId: id,
@@ -294,6 +311,13 @@ export class SessionManager {
       await store.setStatus(id, "failed", `agent start failed: ${(error as Error).message}`);
       throw error;
     }
+    this.attachDownloads(
+      id,
+      browser,
+      downloadsDir,
+      (filename) => agent.downloadDetected(filename),
+      (filename) => agent.downloadCompleted(filename),
+    );
 
     const now = this.deps.now();
     this.sessions.set(id, {
@@ -308,10 +332,13 @@ export class SessionManager {
       kind: "agent",
       browser,
       agent,
+      model: selectedModel,
+      automaticBrowserRestarts: 0,
       scratchProfileDir,
       listeners: new Set(),
       frameListeners: new Set(),
     });
+    this.watchBrowser(id, browser);
 
     await store.setStatus(id, "idle");
     return id;
@@ -369,7 +396,7 @@ export class SessionManager {
 
     let browser: RobotBrowser;
     try {
-      browser = await this.deps.launchBrowser({
+      browser = await this.launchBrowserWithRetry({
         targetUrl: site.baseUrl,
         downloadsDir,
         profileDir,
@@ -476,11 +503,20 @@ export class SessionManager {
    * container. The browser can only write to a real path, so the file lands on
    * disk first and is handed to the store from there.
    */
-  private attachDownloads(id: string, browser: RobotBrowser, downloadsDir: string): void {
+  private attachDownloads(
+    id: string,
+    browser: RobotBrowser,
+    downloadsDir: string,
+    onDetected?: (filename: string) => void,
+    onReady?: (filename: string) => void,
+  ): void {
     browser.onDownload((download) => {
       // basename() prevents a hostile suggested filename from escaping the dir.
       const filename = basename(download.suggestedFilename) || "download";
       const staged = join(downloadsDir, filename);
+      // The download event fires as soon as Chromium accepts it. Block another
+      // click immediately, while the bytes finish moving into durable storage.
+      onDetected?.(filename);
 
       void download
         .saveAs(staged)
@@ -491,6 +527,7 @@ export class SessionManager {
           // be announced as ready.
           if (store.kind !== "local") await rm(staged, { force: true }).catch(() => {});
 
+          onReady?.(filename);
           this.handleEvent(id, {
             type: "file_ready",
             fileId: filename,
@@ -540,6 +577,7 @@ export class SessionManager {
     if (!session.agent) return; // a sign-in session has nobody to instruct
     session.lastActivityAt = this.deps.now();
     this.setStatus(session, "working");
+    session.lastUserMessage = text;
     session.agent.send(text);
 
     // Written to the transcript but not emitted: the sender already rendered
@@ -589,79 +627,171 @@ export class SessionManager {
     session.screencast?.resize(cssWidth, pixelRatio);
   }
 
+  /** Watch the exact browser instance so a later replacement ignores its close event. */
+  private watchBrowser(id: string, browser: RobotBrowser): void {
+    browser.onClose(() => {
+      const session = this.sessions.get(id);
+      if (
+        !session ||
+        session.kind !== "agent" ||
+        session.browser !== browser ||
+        session.restartingBrowser
+      ) {
+        return;
+      }
+
+      const attempts = session.automaticBrowserRestarts ?? 0;
+      if (attempts >= 2) {
+        this.handleEvent(id, {
+          type: "error",
+          message:
+            "The browser exited repeatedly and could not stay running. Check the runtime host resources, then restart the session.",
+        });
+        return;
+      }
+
+      session.automaticBrowserRestarts = attempts + 1;
+      void this.replaceBrowser(id, true).catch((error) => {
+        if (!this.sessions.has(id)) return;
+        this.handleEvent(id, {
+          type: "error",
+          message: `Could not recover the browser: ${(error as Error).message}`,
+        });
+      });
+    });
+  }
+
   /**
-   * Replace a session's browser without ending the session.
+   * Replace both Chromium and the agent connected to its debugging port.
    *
-   * The agent keeps its conversation, but everything it had on screen is gone —
-   * it lands back on the target's home page, freshly authenticated. Use when a
-   * page has wedged or the browser has drifted somewhere unrecoverable.
+   * A Playwright MCP process is permanently bound to the CDP endpoint it
+   * started with. Replacing Chromium alone leaves the agent talking to a dead
+   * port, which is why the old Restart button appeared to work but every tool
+   * still returned ECONNREFUSED.
    */
   async restartBrowser(id: string): Promise<void> {
+    const session = this.require(id);
+    session.automaticBrowserRestarts = 0;
+    await this.replaceBrowser(id, false);
+  }
+
+  private async replaceBrowser(id: string, automatic: boolean): Promise<void> {
     const session = this.require(id);
     if (session.kind !== "agent" || !session.agent) {
       throw new Error("Only a robot session has a browser to restart");
     }
-    const site = await this.deps.store.site(session.siteProfileId);
-    if (!site) throw new SessionError("The site is no longer available", "unknown_site");
+    if (session.restartingBrowser) return;
+    session.restartingBrowser = true;
 
-    const account = await this.deps.store.siteAccount(session.userId, session.siteProfileId);
-    if (!account) throw new SessionError("You have no account on this site", "no_site_account");
+    try {
+      const site = await this.deps.store.site(session.siteProfileId);
+      if (!site) {
+        throw new SessionError("The site is no longer available", "unknown_site");
+      }
 
-    const wasPreviewing = session.previewEnabled;
-    await session.screencast?.stop().catch(() => {});
-    session.screencast = undefined;
-    session.previewEnabled = false;
-    // The cached frame shows a browser that is about to stop existing.
-    session.lastFrame = undefined;
+      const account = await this.deps.store.siteAccount(session.userId, session.siteProfileId);
+      if (!account) {
+        throw new SessionError("You have no account on this site", "no_site_account");
+      }
 
-    const usesSavedLogin = site.loginStrategy === "persistent_profile";
-    const old = session.browser;
+      const shouldResume =
+        (session.status === "working" || session.status === "awaiting_approval") &&
+        Boolean(session.lastUserMessage);
+      const wasPreviewing = session.previewEnabled;
+      await session.screencast?.stop().catch(() => {});
+      session.screencast = undefined;
+      session.previewEnabled = false;
+      // The cached frame shows a browser that is about to stop existing.
+      session.lastFrame = undefined;
 
-    // A saved-login site gets a fresh copy of the profile, so the restarted
-    // browser is logged in the same way the original one was.
-    if (usesSavedLogin && session.scratchProfileDir) {
+      const usesSavedLogin = site.loginStrategy === "persistent_profile";
+      const old = session.browser;
+      const oldAgent = session.agent;
+
+      // Stop the worker whose MCP process is pinned to the dead endpoint before
+      // launching its replacement.
+      await oldAgent.stop().catch(() => {});
       await old.close().catch(() => {});
-      await this.discardScratch(session.scratchProfileDir);
-      await this.deps.profiles.checkout(
-        session.siteProfileId,
-        session.userId,
-        session.scratchProfileDir,
+
+      // A saved-login site gets a fresh copy of the profile, so the restarted
+      // browser is logged in the same way the original one was.
+      if (usesSavedLogin && session.scratchProfileDir) {
+        await this.discardScratch(session.scratchProfileDir);
+        await this.deps.profiles.checkout(
+          session.siteProfileId,
+          session.userId,
+          session.scratchProfileDir,
+        );
+      }
+
+      const browser = await this.launchBrowserWithRetry({
+        targetUrl: site.baseUrl,
+        user: usesSavedLogin
+          ? undefined
+          : {
+              userId: account.targetUserId ?? "",
+              email: account.targetEmail ?? "",
+              name: account.targetName ?? "",
+              role: account.targetRole ?? "user",
+            },
+        sessionSecret: usesSavedLogin ? undefined : (site.secret ?? ""),
+        cookieName: site.cookieName,
+        downloadsDir: join(this.config.downloadsRoot, id),
+        profileDir: session.scratchProfileDir,
+        cookies: usesSavedLogin ? (account.cookies ?? undefined) : undefined,
+      });
+
+      let agent: AgentRunner;
+      try {
+        agent = await this.deps.startAgent({
+          cdpEndpoint: browser.cdpEndpoint,
+          site,
+          model: session.model ?? (await this.deps.store.settings()).defaultModel,
+          env: this.config.env,
+          nodeBin: this.config.nodeBin,
+          sessionId: id,
+          saveFile: (filename, bytes) =>
+            this.storeBytes(id, join(this.config.downloadsRoot, id), filename, bytes),
+          onEvent: (event) => this.handleEvent(id, event),
+        });
+      } catch (error) {
+        await browser.close().catch(() => {});
+        throw error;
+      }
+
+      session.browser = browser;
+      session.agent = agent;
+      this.attachDownloads(
+        id,
+        browser,
+        join(this.config.downloadsRoot, id),
+        (filename) => agent.downloadDetected(filename),
+        (filename) => agent.downloadCompleted(filename),
       );
+      this.watchBrowser(id, browser);
+
+      this.handleEvent(id, {
+        type: "tool_activity",
+        tool: "browser_restart",
+        summary: automatic
+          ? "Browser exited and recovered automatically"
+          : "Browser restarted — back on the home page",
+      });
+
+      if (wasPreviewing) await this.setPreview(id, true);
+
+      if (shouldResume && session.lastUserMessage) {
+        this.setStatus(session, "working");
+        agent.send(
+          `Chromium exited and has been restarted at the application's home page. Resume this user request from the beginning using a fresh snapshot: ${session.lastUserMessage}`,
+        );
+      } else {
+        this.setStatus(session, "idle");
+      }
+    } finally {
+      const current = this.sessions.get(id);
+      if (current) current.restartingBrowser = false;
     }
-
-    session.browser = await this.deps.launchBrowser({
-      targetUrl: site.baseUrl,
-      user: usesSavedLogin
-        ? undefined
-        : {
-            userId: account.targetUserId ?? "",
-            email: account.targetEmail ?? "",
-            name: account.targetName ?? "",
-            role: account.targetRole ?? "user",
-          },
-      sessionSecret: usesSavedLogin ? undefined : (site.secret ?? ""),
-      cookieName: site.cookieName,
-      downloadsDir: join(this.config.downloadsRoot, id),
-      profileDir: session.scratchProfileDir,
-      cookies: usesSavedLogin ? (account.cookies ?? undefined) : undefined,
-    });
-    if (!usesSavedLogin) await old.close().catch(() => {});
-
-    this.attachDownloads(id, session.browser, join(this.config.downloadsRoot, id));
-
-    // The agent still holds tools pointed at the old browser's debugging port,
-    // so it must be told rather than left to discover the failure mid-task.
-    session.agent?.send(
-      "Your browser was restarted and is back on the home page. Anything you had open is gone — take a fresh snapshot before continuing.",
-    );
-
-    this.handleEvent(id, {
-      type: "tool_activity",
-      tool: "browser_restart",
-      summary: "Browser restarted — back on the home page",
-    });
-
-    if (wasPreviewing) await this.setPreview(id, true);
   }
 
   async stop(id: string, reason = "stopped by user"): Promise<void> {
@@ -739,6 +869,7 @@ export class SessionManager {
     if (event.type === "approval_request" || event.type === "choice_request") {
       this.setStatus(session, "awaiting_approval");
     }
+    if (event.type === "file_ready") this.setStatus(session, "idle");
     if (event.type === "error") this.setStatus(session, "failed");
 
     this.emit(session, event);

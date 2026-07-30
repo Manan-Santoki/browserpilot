@@ -255,6 +255,10 @@ describe("restarting a browser", () => {
     const { port, manager, state } = start();
     const id = await manager.create(fx.userId, fx.siteId);
     const before = manager.get(id)!.browser;
+    const activity: string[] = [];
+    manager.subscribe(id, (event) => {
+      if (event.type === "tool_activity") activity.push(event.summary);
+    });
 
     const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/restart`, {
       method: "POST",
@@ -266,8 +270,11 @@ describe("restarting a browser", () => {
     expect(manager.get(id)).toBeDefined();
     expect(manager.get(id)!.browser).not.toBe(before);
     expect(state.closed.browser).toBe(1);
-    // The agent is told, rather than left holding tools for a dead browser.
-    expect(state.sent.some((m) => /restarted/i.test(m))).toBe(true);
+    // The worker is replaced too: its Playwright tools are pinned to the old
+    // browser's CDP endpoint and cannot be reused.
+    expect(state.agentStarts).toBe(2);
+    expect(manager.get(id)!.status).toBe("idle");
+    expect(activity).toContain("Browser restarted — back on the home page");
 
     await manager.stop(id);
   });

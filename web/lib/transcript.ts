@@ -23,6 +23,7 @@ export type ChatItem =
 type StoredEvent = {
   type?: string;
   text?: string;
+  tool?: string;
   summary?: string;
   message?: string;
   filename?: string;
@@ -50,26 +51,44 @@ export async function loadTranscript(sessionId: string): Promise<ChatItem[]> {
     .orderBy(asc(sessionEvents.seq));
 
   const items: ChatItem[] = [];
+  let downloadComplete = false;
 
   for (const row of rows) {
     const event = row.payload as StoredEvent;
 
     switch (event.type) {
       case "user_msg":
-        if (event.text) items.push({ kind: "you", text: event.text });
+        if (event.text) {
+          downloadComplete = false;
+          items.push({ kind: "you", text: event.text });
+        }
         break;
       case "agent_text":
         if (event.text) items.push({ kind: "agent", text: event.text });
         break;
       case "tool_activity":
-        if (event.summary) items.push({ kind: "tool", text: event.summary });
+        if (
+          event.summary &&
+          event.tool !== "browser_run_code_unsafe" &&
+          !(downloadComplete && event.tool?.startsWith("browser_"))
+        ) {
+          items.push({ kind: "tool", text: event.summary });
+        }
         break;
       case "error":
         if (event.message) items.push({ kind: "error", text: event.message });
         break;
       case "file_ready":
         if (event.filename && event.url) {
-          items.push({ kind: "file", filename: event.filename, url: event.url });
+          downloadComplete = true;
+          const alreadyShown = items.some(
+            (item) =>
+              item.kind === "file" &&
+              (item.url === event.url || item.filename === event.filename),
+          );
+          if (!alreadyShown) {
+            items.push({ kind: "file", filename: event.filename, url: event.url });
+          }
         }
         break;
       case "screenshot":
@@ -78,7 +97,11 @@ export async function loadTranscript(sessionId: string): Promise<ChatItem[]> {
         }
         break;
       case "approval_request":
-        if (event.requestId) {
+        if (
+          event.requestId &&
+          event.tool !== "browser_run_code_unsafe" &&
+          !(downloadComplete && event.tool?.startsWith("browser_"))
+        ) {
           items.push({
             kind: "approval",
             requestId: event.requestId,

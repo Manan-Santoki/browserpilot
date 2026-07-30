@@ -61,6 +61,10 @@ export type AgentRunner = {
   send(text: string): void;
   approve(requestId: string, approved: boolean): void;
   choose(requestId: string, value: string): void;
+  /** Block follow-up browser calls as soon as Chromium reports a download. */
+  downloadDetected(filename: string): void;
+  /** End the current turn once the browser has produced the requested file. */
+  downloadCompleted(filename: string): void;
   stop(): Promise<void>;
 };
 
@@ -210,6 +214,8 @@ export async function startAgent(
   >();
   let nextRequestId = 0;
   let nextChoiceId = 0;
+  let completedDownload: string | undefined;
+  let interruptedForDownload = false;
 
   const browserPilot = createSdkMcpServer({
     name: "browserpilot",
@@ -308,9 +314,29 @@ export async function startAgent(
     toolInput: Record<string, unknown>,
   ): Promise<PermissionResult> => {
     const updatedInput = normalizeToolInput(toolName, toolInput);
+    const short = shortToolName(toolName);
+
+    // A browser download is the terminal result for this turn. This guard is
+    // deliberately runtime-enforced rather than prompt-only: otherwise a model
+    // can keep inspecting network logs, running code, and clicking the same
+    // download button while the first file is already visible to the user.
+    if (completedDownload && short.startsWith("browser_")) {
+      return {
+        behavior: "deny",
+        message: `${completedDownload} has already downloaded. Stop this turn without calling more browser tools.`,
+      };
+    }
 
     // Classified on what the model actually asked for, not on our rewrite.
-    if (classifyToolUse(toolName, toolInput, opts.site.destructivePatterns) === "auto") {
+    const classification = classifyToolUse(toolName, toolInput, opts.site.destructivePatterns);
+    if (classification === "deny") {
+      return {
+        behavior: "deny",
+        message:
+          "Unsafe arbitrary code execution is disabled. Use browser_snapshot and the visible browser actions.",
+      };
+    }
+    if (classification === "auto") {
       return { behavior: "allow", updatedInput };
     }
 
@@ -406,13 +432,22 @@ export async function startAgent(
               opts.onEvent({ type: "agent_text", text: block.text });
             } else if (block.type === "tool_use" && typeof block.name === "string") {
               const toolInput = (block.input ?? {}) as Record<string, unknown>;
+              const short = shortToolName(block.name);
               // The structured selector is its own visible conversation item;
               // a machine-log line immediately before it would say the same
               // thing less clearly.
-              if (shortToolName(block.name) === "ask_user_choice") continue;
+              if (short === "ask_user_choice") continue;
+              // Denied unsafe calls and stale calls after a completed download
+              // are implementation noise, not useful transcript entries.
+              if (
+                short === "browser_run_code_unsafe" ||
+                (completedDownload && short.startsWith("browser_"))
+              ) {
+                continue;
+              }
               opts.onEvent({
                 type: "tool_activity",
-                tool: shortToolName(block.name),
+                tool: short,
                 summary: summarize(block.name, toolInput),
               });
             }
@@ -439,6 +474,8 @@ export async function startAgent(
 
   return {
     send(text: string) {
+      completedDownload = undefined;
+      interruptedForDownload = false;
       input.push(text);
     },
     approve(requestId: string, approved: boolean) {
@@ -450,6 +487,17 @@ export async function startAgent(
       if (!pending || !selected) return;
       choices.delete(requestId);
       pending.resolve(selected);
+    },
+    downloadDetected(filename: string) {
+      completedDownload ??= filename;
+    },
+    downloadCompleted(filename: string) {
+      completedDownload ??= filename;
+      if (interruptedForDownload) return;
+      interruptedForDownload = true;
+      // Stop the current tool chain immediately. The query stays open so the
+      // next user message can start a fresh turn in the same session.
+      void session.interrupt().catch(() => {});
     },
     async stop() {
       approvals.forEach((resolve) => resolve(false));

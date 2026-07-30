@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getTicket, stopSession } from "../../lib/api";
 import { colour, radius, space, type } from "../../lib/theme";
 import { Button, Mono, Notice, StatusLamp } from "../../components/ui";
+import { AgentMarkdown } from "../../components/agent-markdown";
 import {
   LivePreview,
   type LivePreviewHandle,
@@ -413,7 +414,7 @@ function Line({
     );
   }
   if (item.kind === "agent") {
-    return <Text style={type.body}>{item.text}</Text>;
+    return <AgentMarkdown>{item.text}</AgentMarkdown>;
   }
   if (item.kind === "tool") {
     return <Mono style={{ color: colour.textFaint }}>{item.text}</Mono>;

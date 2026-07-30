@@ -106,7 +106,9 @@ export async function createFixtures(prefix: string): Promise<Fixtures> {
 
 export type FakeBrowserState = {
   fireDownload?: (d: { suggestedFilename: string; saveAs: (p: string) => Promise<void> }) => void;
+  fireBrowserClose?: () => void;
   pushFrame?: (frame: string) => void;
+  browserLaunches: number;
   screencastStarts: number;
   screencastStops: number;
   /** Sizes the console asked the stream to render at. */
@@ -114,7 +116,10 @@ export type FakeBrowserState = {
   emit?: (event: RobotEvent) => void;
   /** The runner's route for keeping a file, as the manager wired it. */
   saveFile?: (filename: string, bytes: Uint8Array) => Promise<void>;
+  detectedDownloads: string[];
+  completedDownloads: string[];
   sent: string[];
+  agentStarts: number;
   closed: { browser: number; agent: number; input: number };
   /** What the target answered the opening navigation with. */
   landingUrl: string;
@@ -155,15 +160,19 @@ function fakeProfiles(state: FakeBrowserState): ManagerDeps["profiles"] {
 /** Manager dependencies backed by fakes, so no browser or model is involved. */
 export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
   const state: FakeBrowserState = {
+    browserLaunches: 0,
     screencastStarts: 0,
     screencastStops: 0,
     resizes: [],
     sent: [],
+    agentStarts: 0,
     closed: { browser: 0, agent: 0, input: 0 },
     landingUrl: "https://target.test/dashboard",
     linked: new Set(),
     cookiesInBrowser: [{ name: "session_c", value: "S" }],
     cookiesApplied: [],
+    detectedDownloads: [],
+    completedDownloads: [],
     checkouts: [],
     syncedBack: [],
     dispatched: [],
@@ -184,7 +193,9 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
     }),
     now: () => clock,
     launchBrowser: async (args): Promise<RobotBrowser> => {
+      state.browserLaunches++;
       state.cookiesApplied.push(args.cookies as Array<{ name: string; value: string }> | undefined);
+      let closeHandler: (() => void) | undefined;
       return {
         cdpEndpoint: "http://127.0.0.1:1",
         downloadsDir: args.downloadsDir,
@@ -194,18 +205,26 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
         onDownload: (handler) => {
           state.fireDownload = handler;
         },
+        onClose: (handler) => {
+          closeHandler = handler;
+          state.fireBrowserClose = handler;
+        },
         close: async () => {
           state.closed.browser++;
+          closeHandler?.();
         },
       };
     },
     startAgent: async (args) => {
+      state.agentStarts++;
       state.emit = args.onEvent;
       state.saveFile = args.saveFile;
       return {
         send: (t: string) => state.sent.push(t),
         approve: () => {},
         choose: () => {},
+        downloadDetected: (filename: string) => state.detectedDownloads.push(filename),
+        downloadCompleted: (filename: string) => state.completedDownloads.push(filename),
         stop: async () => {
           state.closed.agent++;
         },
