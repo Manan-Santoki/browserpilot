@@ -9,6 +9,8 @@ import { StatusLabel } from "@/components/status-lamp";
 import { StartSessionForm } from "./start-form";
 import { stopSession } from "./sessions/actions";
 import { ConfirmAction } from "@/components/confirm-action";
+import { SessionThumbnail } from "@/components/session-thumbnail";
+import { listRuntimeSessions } from "@/lib/runtime";
 
 const LIVE = ["starting", "idle", "working", "awaiting_approval"] as const;
 
@@ -66,7 +68,22 @@ export default async function SessionsPage() {
     .where(eq(siteProfiles.isActive, true))
     .orderBy(siteProfiles.name);
 
-  const needsYou = live.filter((s) => s.status === "awaiting_approval").length;
+  const runtime = await listRuntimeSessions(user);
+  const runtimeById = new Map(
+    runtime.ok ? runtime.data.sessions.map((session) => [session.id, session]) : [],
+  );
+  const connectedLive = live
+    .filter((session) => !runtime.ok || runtimeById.has(session.id))
+    .map((session) => {
+      const running = runtimeById.get(session.id);
+      return {
+        ...session,
+        status: running?.status ?? session.status,
+        connected: Boolean(running),
+      };
+    });
+
+  const needsYou = connectedLive.filter((s) => s.status === "awaiting_approval").length;
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8">
@@ -74,17 +91,17 @@ export default async function SessionsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Sessions</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            {live.length === 0 ? (
+            {connectedLive.length === 0 ? (
               "Nothing running."
             ) : needsYou > 0 ? (
               <>
                 <span className="text-signal">
                   {needsYou} waiting for you
                 </span>{" "}
-                · {live.length} running{isAdmin ? " across all users" : ""}.
+                · {connectedLive.length} running{isAdmin ? " across all users" : ""}.
               </>
             ) : (
-              `${live.length} running${isAdmin ? " across all users" : ""}.`
+              `${connectedLive.length} running${isAdmin ? " across all users" : ""}.`
             )}
           </p>
         </div>
@@ -92,9 +109,9 @@ export default async function SessionsPage() {
         <StartSessionForm sites={startable} />
       </div>
 
-      {live.length > 0 ? (
+      {connectedLive.length > 0 ? (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {live.map((session) => (
+          {connectedLive.map((session) => (
             <li key={session.id}>
               <Card
                 className={
@@ -103,11 +120,13 @@ export default async function SessionsPage() {
               >
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <StatusLabel status={session.status} />
+                    <StatusLabel status={session.status} live={session.connected} />
                     <span className="text-muted-foreground tabular font-mono text-xs">
                       {elapsed(session.startedAt)}
                     </span>
                   </div>
+
+                  {session.connected ? <SessionThumbnail sessionId={session.id} /> : null}
 
                   <p className="mt-3 truncate font-medium">
                     {session.title ?? session.siteName ?? "Session"}

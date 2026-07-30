@@ -5,9 +5,36 @@ describe("classifyToolUse", () => {
   test("read-only browser tools run without approval", () => {
     expect(classifyToolUse("mcp__playwright__browser_snapshot", {})).toBe("auto");
     expect(classifyToolUse("mcp__playwright__browser_take_screenshot", {})).toBe("auto");
+    expect(classifyToolUse("mcp__playwright__browser_console_messages", { level: "error" })).toBe(
+      "auto",
+    );
+    expect(
+      classifyToolUse("mcp__playwright__browser_network_requests", { static: false }),
+    ).toBe("auto");
+    expect(classifyToolUse("mcp__playwright__browser_network_request", { index: 1 })).toBe("auto");
     expect(classifyToolUse("mcp__playwright__browser_navigate", { url: "https://x.test" })).toBe(
       "auto",
     );
+  });
+
+  test("listing or selecting an existing tab runs without approval", () => {
+    expect(classifyToolUse("mcp__playwright__browser_tabs", { action: "list" })).toBe("auto");
+    expect(
+      classifyToolUse("mcp__playwright__browser_tabs", { action: "select", index: 1 }),
+    ).toBe("auto");
+    expect(classifyToolUse("mcp__playwright__browser_tabs", { action: "new" })).toBe("approve");
+    expect(
+      classifyToolUse("mcp__playwright__browser_tabs", { action: "close", index: 1 }),
+    ).toBe("approve");
+  });
+
+  test("asking the user to choose is handled by BrowserPilot, not the approval gate", () => {
+    expect(
+      classifyToolUse("mcp__browserpilot__ask_user_choice", {
+        question: "Which transport?",
+        options: [],
+      }),
+    ).toBe("auto");
   });
 
   test("ordinary clicks and typing run without approval", () => {

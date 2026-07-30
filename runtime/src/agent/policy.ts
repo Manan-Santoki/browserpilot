@@ -2,6 +2,9 @@
 const AUTO_TOOLS = new Set([
   "mcp__playwright__browser_snapshot",
   "mcp__playwright__browser_take_screenshot",
+  "mcp__playwright__browser_console_messages",
+  "mcp__playwright__browser_network_request",
+  "mcp__playwright__browser_network_requests",
   "mcp__playwright__browser_navigate",
   "mcp__playwright__browser_navigate_back",
   "mcp__playwright__browser_find",
@@ -13,6 +16,12 @@ const AUTO_TOOLS = new Set([
   "mcp__playwright__browser_type",
   "mcp__playwright__browser_fill_form",
   "mcp__playwright__browser_click",
+  // Listing and selecting tabs only changes which already-open page is in
+  // front. Creating or closing one is classified separately below.
+  "mcp__playwright__browser_tabs",
+  // This tool does not act on the target site. It parks the agent while the
+  // BrowserPilot UI renders a structured choice for the person.
+  "mcp__browserpilot__ask_user_choice",
   // Runs arbitrary JavaScript in the page. Allowed by choice: gating it
   // interrupted routine reads (checking a value the snapshot did not expose)
   // far more often than it caught anything risky. Destructive *clicks* are
@@ -55,6 +64,11 @@ export function classifyToolUse(
   destructiveWords?: string[] | null,
 ): "auto" | "approve" {
   if (!AUTO_TOOLS.has(toolName)) return "approve";
+
+  if (toolName === "mcp__playwright__browser_tabs") {
+    const action = input.action;
+    if (action !== "list" && action !== "select") return "approve";
+  }
 
   if (toolName === "mcp__playwright__browser_click") {
     const pattern =

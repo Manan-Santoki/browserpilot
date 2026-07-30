@@ -1,14 +1,21 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import {
+  createSdkMcpServer,
   query,
+  tool,
   type Options,
   type PermissionResult,
   type Query,
 } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod/v4";
 import { classifyToolUse } from "./policy";
 import { buildSystemPrompt } from "./prompt";
-import { sessionFileUrl, type RobotEvent } from "../session/events";
+import {
+  sessionFileUrl,
+  type ChoiceOption,
+  type RobotEvent,
+} from "../session/events";
 import type { TargetSite } from "../store";
 
 export type QueryFn = (params: { prompt: AsyncIterable<never>; options?: Options }) => Query;
@@ -53,6 +60,7 @@ export type StartAgentDeps = {
 export type AgentRunner = {
   send(text: string): void;
   approve(requestId: string, approved: boolean): void;
+  choose(requestId: string, value: string): void;
   stop(): Promise<void>;
 };
 
@@ -110,7 +118,8 @@ function subprocessEnv(credential: Record<string, string>): Record<string, strin
 }
 
 function shortToolName(name: string): string {
-  return name.replace(/^mcp__playwright__/, "");
+  const [prefix, _server, ...toolName] = name.split("__");
+  return prefix === "mcp" && toolName.length > 0 ? toolName.join("__") : name;
 }
 
 /**
@@ -192,7 +201,107 @@ export async function startAgent(
   const queryFn = deps.queryFn ?? (query as unknown as QueryFn);
   const input = createInputStream();
   const approvals = new Map<string, (approved: boolean) => void>();
+  const choices = new Map<
+    string,
+    {
+      options: ChoiceOption[];
+      resolve: (choice: ChoiceOption | null) => void;
+    }
+  >();
   let nextRequestId = 0;
+  let nextChoiceId = 0;
+
+  const browserPilot = createSdkMcpServer({
+    name: "browserpilot",
+    version: "1.0.0",
+    alwaysLoad: true,
+    instructions:
+      "Use ask_user_choice whenever the application presents a finite set of values the person must choose between.",
+    tools: [
+      tool(
+        "ask_user_choice",
+        "Pause and show an inline selector in BrowserPilot. Open and inspect the application's dropdown first, then pass every available option with its exact value. Use this instead of listing options in prose or asking the person to type one.",
+        {
+          question: z.string().min(1).max(500),
+          options: z
+            .array(
+              z.object({
+                label: z.string().min(1).max(120),
+                value: z.string().min(1).max(500),
+                description: z.string().max(300).optional(),
+              }),
+            )
+            .min(2)
+            .max(50),
+        },
+        async ({ question, options }) => {
+          // Repeated values cannot be distinguished by the UI or safely sent
+          // back to the model, so keep the first label for each exact value.
+          const seen = new Set<string>();
+          const available = options.filter((option) => {
+            if (seen.has(option.value)) return false;
+            seen.add(option.value);
+            return true;
+          });
+
+          if (available.length < 2) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: "At least two distinct option values are required.",
+                },
+              ],
+            };
+          }
+
+          const requestId = `choice_${++nextChoiceId}`;
+          opts.onEvent({
+            type: "choice_request",
+            requestId,
+            question,
+            options: available,
+          });
+
+          const selected = await new Promise<ChoiceOption | null>((resolve) => {
+            choices.set(requestId, { options: available, resolve });
+          });
+
+          if (!selected) {
+            return {
+              content: [{ type: "text", text: "The session ended before the user chose." }],
+            };
+          }
+
+          opts.onEvent({
+            type: "choice_resolved",
+            requestId,
+            value: selected.value,
+            label: selected.label,
+          });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `The user selected "${selected.label}" (exact value: "${selected.value}"). Continue using that selection.`,
+              },
+            ],
+          };
+        },
+        {
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+          },
+          alwaysLoad: true,
+        },
+      ),
+    ],
+  });
 
   const canUseTool = async (
     toolName: string,
@@ -244,6 +353,7 @@ export async function startAgent(
         args: [playwrightMcpCliPath(), "--cdp-endpoint", opts.cdpEndpoint, "--caps", "pdf"],
         alwaysLoad: true,
       },
+      browserpilot: browserPilot,
     },
     canUseTool,
   };
@@ -296,6 +406,10 @@ export async function startAgent(
               opts.onEvent({ type: "agent_text", text: block.text });
             } else if (block.type === "tool_use" && typeof block.name === "string") {
               const toolInput = (block.input ?? {}) as Record<string, unknown>;
+              // The structured selector is its own visible conversation item;
+              // a machine-log line immediately before it would say the same
+              // thing less clearly.
+              if (shortToolName(block.name) === "ask_user_choice") continue;
               opts.onEvent({
                 type: "tool_activity",
                 tool: shortToolName(block.name),
@@ -330,9 +444,18 @@ export async function startAgent(
     approve(requestId: string, approved: boolean) {
       approvals.get(requestId)?.(approved);
     },
+    choose(requestId: string, value: string) {
+      const pending = choices.get(requestId);
+      const selected = pending?.options.find((option) => option.value === value);
+      if (!pending || !selected) return;
+      choices.delete(requestId);
+      pending.resolve(selected);
+    },
     async stop() {
       approvals.forEach((resolve) => resolve(false));
       approvals.clear();
+      choices.forEach(({ resolve }) => resolve(null));
+      choices.clear();
       input.close();
       await session.interrupt().catch(() => {});
       session.close();

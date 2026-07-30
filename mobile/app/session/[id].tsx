@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Image,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -13,9 +13,14 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getTicket, stopSession } from "../../lib/api";
 import { colour, radius, space, type } from "../../lib/theme";
 import { Button, Mono, Notice, StatusLamp } from "../../components/ui";
+import {
+  LivePreview,
+  type LivePreviewHandle,
+} from "../../components/live-preview";
 
 type Item =
   | { kind: "you"; text: string }
@@ -23,7 +28,14 @@ type Item =
   | { kind: "tool"; text: string }
   | { kind: "error"; text: string }
   | { kind: "file"; filename: string }
-  | { kind: "approval"; requestId: string; summary: string; resolved?: string };
+  | { kind: "approval"; requestId: string; summary: string; resolved?: string }
+  | {
+      kind: "choice";
+      requestId: string;
+      question: string;
+      options: Array<{ label: string; value: string; description?: string }>;
+      resolved?: { label: string; value: string };
+    };
 
 /**
  * One running browser: what it looks like, what it is saying, and the one
@@ -37,13 +49,13 @@ type Item =
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
 
   const [items, setItems] = useState<Item[]>([]);
   const [status, setStatus] = useState("connecting");
   const [connected, setConnected] = useState(false);
-  const [frame, setFrame] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
@@ -54,15 +66,35 @@ export default function SessionScreen() {
    * again gives the conversation back.
    */
   const [expanded, setExpanded] = useState(false);
+  const [previewMinimized, setPreviewMinimized] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
   const logRef = useRef<ScrollView | null>(null);
+  const previewRef = useRef<LivePreviewHandle | null>(null);
 
   const append = useCallback((item: Item) => setItems((prev) => [...prev, item]), []);
 
   useEffect(() => {
     navigation.setOptions({ title: "Session" });
   }, [navigation]);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener("keyboardDidShow", (event) => {
+      setExpanded(false);
+      setKeyboardOpen(true);
+      setKeyboardInset(Platform.OS === "android" ? event.endCoordinates.height : 0);
+    });
+    const hidden = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardOpen(false);
+      setKeyboardInset(0);
+    });
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let closed = false;
@@ -99,7 +131,7 @@ export default function SessionScreen() {
 
           switch (msg.type) {
             case "frame":
-              setFrame(String(msg.data));
+              previewRef.current?.push(String(msg.data));
               break;
             case "agent_text":
               append({ kind: "agent", text: String(msg.text) });
@@ -125,6 +157,35 @@ export default function SessionScreen() {
                 prev.map((item) =>
                   item.kind === "approval" && item.requestId === msg.requestId
                     ? { ...item, resolved: msg.approved ? "approved" : "denied" }
+                    : item,
+                ),
+              );
+              break;
+            case "choice_request":
+              append({
+                kind: "choice",
+                requestId: String(msg.requestId),
+                question: String(msg.question),
+                options: Array.isArray(msg.options)
+                  ? (msg.options as Array<{
+                      label: string;
+                      value: string;
+                      description?: string;
+                    }>)
+                  : [],
+              });
+              break;
+            case "choice_resolved":
+              setItems((prev) =>
+                prev.map((item) =>
+                  item.kind === "choice" && item.requestId === msg.requestId
+                    ? {
+                        ...item,
+                        resolved: {
+                          label: String(msg.label),
+                          value: String(msg.value),
+                        },
+                      }
                     : item,
                 ),
               );
@@ -161,6 +222,10 @@ export default function SessionScreen() {
     socketRef.current?.send(JSON.stringify({ type: "approval", requestId, approved }));
   };
 
+  const choose = (requestId: string, value: string) => {
+    socketRef.current?.send(JSON.stringify({ type: "choice", requestId, value }));
+  };
+
   const pending = items.find((i) => i.kind === "approval" && !i.resolved) as
     | Extract<Item, { kind: "approval" }>
     | undefined;
@@ -169,41 +234,78 @@ export default function SessionScreen() {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colour.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
-      <View style={{ flex: 1, flexDirection: landscape ? "row" : "column" }}>
+      <View
+        style={{
+          flex: 1,
+          paddingBottom: keyboardInset,
+          flexDirection:
+            landscape && !previewMinimized && !keyboardOpen ? "row" : "column",
+        }}
+      >
         {/* The browser. On a tablet held sideways it takes the left half; on a
             phone it is a band across the top, sized to the frame's own shape,
             unless it has been given the whole screen. */}
-        <Pressable
-          onPress={() => setExpanded((open) => !open)}
+        <View
           style={[
             styles.preview,
+            (previewMinimized || keyboardOpen) && styles.previewMinimized,
             landscape || expanded ? { flex: 1 } : { aspectRatio: 16 / 10 },
           ]}
         >
-          {frame ? (
-            <Image
-              source={{ uri: `data:image/jpeg;base64,${frame}` }}
-              style={{ flex: 1 }}
-              resizeMode="contain"
-            />
-          ) : (
-            <View style={styles.previewEmpty}>
+          <LivePreview
+            ref={previewRef}
+            placeholder={
               <Text style={type.small}>
                 {connected ? "Waiting for the browser…" : "Connecting…"}
               </Text>
-            </View>
-          )}
+            }
+          />
 
-          <View style={styles.expandHint}>
-            <Ionicons
-              name={expanded ? "contract-outline" : "expand-outline"}
-              size={16}
-              color={colour.text}
-            />
+          <View style={styles.previewControls}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Minimize live preview"
+              hitSlop={8}
+              onPress={() => {
+                setExpanded(false);
+                setPreviewMinimized(true);
+              }}
+              style={styles.previewControl}
+            >
+              <Ionicons name="remove-outline" size={18} color={colour.text} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={expanded ? "Contract live preview" : "Expand live preview"}
+              hitSlop={8}
+              onPress={() => setExpanded((open) => !open)}
+              style={styles.previewControl}
+            >
+              <Ionicons
+                name={expanded ? "contract-outline" : "expand-outline"}
+                size={18}
+                color={colour.text}
+              />
+            </Pressable>
           </View>
-        </Pressable>
+        </View>
+
+        {previewMinimized && !keyboardOpen ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Restore live preview"
+            onPress={() => setPreviewMinimized(false)}
+            style={styles.previewCollapsed}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+              <Ionicons name="videocam-outline" size={17} color={colour.textFaint} />
+              <Text style={type.small}>Live preview minimized</Text>
+            </View>
+            <Ionicons name="chevron-down-outline" size={18} color={colour.text} />
+          </Pressable>
+        ) : null}
 
         {/* Giving the browser the screen hides the conversation, but never an
             approval waiting for an answer — that is the one thing worth
@@ -238,7 +340,7 @@ export default function SessionScreen() {
             ) : null}
 
             {items.map((item, i) => (
-              <Line key={i} item={item} />
+              <Line key={i} item={item} choose={choose} connected={connected} />
             ))}
           </ScrollView>
 
@@ -264,7 +366,7 @@ export default function SessionScreen() {
           ) : null}
 
           {!ended ? (
-            <View style={styles.composer}>
+            <View style={[styles.composer, { paddingBottom: Math.max(space.md, insets.bottom) }]}>
               <TextInput
                 value={draft}
                 onChangeText={setDraft}
@@ -284,7 +386,7 @@ export default function SessionScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={styles.composer}>
+            <View style={[styles.composer, { paddingBottom: Math.max(space.md, insets.bottom) }]}>
               <Text style={type.small}>This session has ended.</Text>
             </View>
           )}
@@ -294,7 +396,15 @@ export default function SessionScreen() {
   );
 }
 
-function Line({ item }: { item: Item }) {
+function Line({
+  item,
+  choose,
+  connected,
+}: {
+  item: Item;
+  choose: (requestId: string, value: string) => void;
+  connected: boolean;
+}) {
   if (item.kind === "you") {
     return (
       <View style={styles.youBubble}>
@@ -314,6 +424,34 @@ function Line({ item }: { item: Item }) {
   if (item.kind === "file") {
     return <Mono style={{ color: colour.signal }}>↓ {item.filename}</Mono>;
   }
+  if (item.kind === "choice") {
+    return (
+      <View style={styles.choice}>
+        <Text style={[type.tiny, { color: colour.signal, textTransform: "uppercase" }]}>
+          Choose one
+        </Text>
+        <Text style={[type.small, { color: colour.text, marginTop: space.xs }]}>
+          {item.question}
+        </Text>
+        <View style={{ gap: space.sm, marginTop: space.md }}>
+          {item.options.map((option) => (
+            <Button
+              key={option.value}
+              label={option.label}
+              variant="secondary"
+              disabled={Boolean(item.resolved) || !connected}
+              onPress={() => choose(item.requestId, option.value)}
+            />
+          ))}
+        </View>
+        {item.resolved ? (
+          <Text style={[type.tiny, { marginTop: space.sm }]}>
+            Selected: {item.resolved.label}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
   return (
     <Mono style={{ color: colour.signal }}>
       {item.summary} — {item.resolved ?? "waiting"}
@@ -327,7 +465,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colour.border,
   },
-  previewEmpty: { flex: 1, alignItems: "center", justifyContent: "center" },
+  previewMinimized: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
+    overflow: "hidden",
+  },
+  previewCollapsed: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colour.border,
+    backgroundColor: colour.card,
+  },
   statusBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -337,18 +491,29 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colour.border,
   },
-  expandHint: {
+  previewControls: {
     position: "absolute",
     right: space.sm,
     bottom: space.sm,
-    padding: space.sm,
+    flexDirection: "row",
+    gap: 2,
     borderRadius: radius.sm,
     backgroundColor: "#0f1115bb",
+  },
+  previewControl: {
+    padding: space.sm,
   },
   approval: {
     borderTopWidth: 1,
     borderTopColor: colour.signal,
     backgroundColor: "#e8a33d14",
+    padding: space.md,
+  },
+  choice: {
+    borderWidth: 1,
+    borderColor: colour.signal,
+    backgroundColor: "#e8a33d14",
+    borderRadius: radius.md,
     padding: space.md,
   },
   composer: {

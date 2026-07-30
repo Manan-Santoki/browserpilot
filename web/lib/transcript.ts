@@ -11,7 +11,14 @@ export type ChatItem =
   | { kind: "file"; filename: string; url: string }
   /** A picture the agent took, shown in the conversation rather than linked. */
   | { kind: "screenshot"; filename: string; url: string }
-  | { kind: "approval"; requestId: string; summary: string; resolved?: "approved" | "denied" };
+  | { kind: "approval"; requestId: string; summary: string; resolved?: "approved" | "denied" }
+  | {
+      kind: "choice";
+      requestId: string;
+      question: string;
+      options: Array<{ label: string; value: string; description?: string }>;
+      resolved?: { label: string; value: string };
+    };
 
 type StoredEvent = {
   type?: string;
@@ -22,6 +29,10 @@ type StoredEvent = {
   url?: string;
   requestId?: string;
   approved?: boolean;
+  question?: string;
+  options?: Array<{ label?: string; value?: string; description?: string }>;
+  value?: string;
+  label?: string;
 };
 
 /**
@@ -82,6 +93,44 @@ export async function loadTranscript(sessionId: string): Promise<ChatItem[]> {
         );
         if (target && target.kind === "approval") {
           target.resolved = event.approved ? "approved" : "denied";
+        }
+        break;
+      }
+      case "choice_request":
+        if (event.requestId && event.question && Array.isArray(event.options)) {
+          const options = event.options
+            .filter(
+              (option): option is { label: string; value: string; description?: string } =>
+                typeof option.label === "string" && typeof option.value === "string",
+            )
+            .map((option) => ({
+              label: option.label,
+              value: option.value,
+              ...(typeof option.description === "string"
+                ? { description: option.description }
+                : {}),
+            }));
+          if (options.length > 0) {
+            items.push({
+              kind: "choice",
+              requestId: event.requestId,
+              question: event.question,
+              options,
+            });
+          }
+        }
+        break;
+      case "choice_resolved": {
+        const target = items.find(
+          (item) => item.kind === "choice" && item.requestId === event.requestId,
+        );
+        if (
+          target &&
+          target.kind === "choice" &&
+          typeof event.value === "string" &&
+          typeof event.label === "string"
+        ) {
+          target.resolved = { value: event.value, label: event.label };
         }
         break;
       }

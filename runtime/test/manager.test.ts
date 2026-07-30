@@ -131,6 +131,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
       return {
         send: (t: string) => sent.push(t),
         approve: () => {},
+        choose: () => {},
         stop: async () => {
           closed.agent++;
         },
@@ -306,6 +307,26 @@ describe("events and lifecycle", () => {
     const id = await manager.create(userId, siteId);
 
     fire({ type: "approval_request", requestId: "apr_1", tool: "browser_click", summary: "x" });
+    expect(manager.get(id)!.status).toBe("awaiting_approval");
+
+    await manager.stop(id);
+    await cleanupSessions();
+  });
+
+  test("a structured choice moves the session to awaiting_approval", async () => {
+    const { deps, fire } = makeDeps();
+    const manager = new SessionManager(config, deps);
+    const id = await manager.create(userId, siteId);
+
+    fire({
+      type: "choice_request",
+      requestId: "choice_1",
+      question: "Which transport?",
+      options: [
+        { label: "Courier", value: "courier" },
+        { label: "Pickup", value: "pickup" },
+      ],
+    });
     expect(manager.get(id)!.status).toBe("awaiting_approval");
 
     await manager.stop(id);

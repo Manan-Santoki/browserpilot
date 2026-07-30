@@ -374,6 +374,9 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           case "approval":
             manager.approve(id, command.requestId, command.approved);
             break;
+          case "choice":
+            manager.choose(id, command.requestId, command.value);
+            break;
           case "preview":
             void manager.setPreview(id, command.enabled);
             break;

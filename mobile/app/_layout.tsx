@@ -18,7 +18,10 @@ export default function RootLayout() {
   const [paired, setPaired] = useState<boolean | null>(null);
 
   useEffect(() => {
-    void isPaired().then(setPaired);
+    // A stale or unavailable keystore must not strand the app on its loading
+    // surface. Treat it like an unpaired device so the person can recover by
+    // scanning a fresh code.
+    void isPaired().then(setPaired).catch(() => setPaired(false));
   }, []);
 
   return (

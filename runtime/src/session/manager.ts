@@ -555,6 +555,14 @@ export class SessionManager {
     session.agent.approve(requestId, approved);
   }
 
+  choose(id: string, requestId: string, value: string): void {
+    const session = this.require(id);
+    if (!session.agent) return;
+    session.lastActivityAt = this.deps.now();
+    this.setStatus(session, "working");
+    session.agent.choose(requestId, value);
+  }
+
   async setPreview(id: string, enabled: boolean): Promise<void> {
     const session = this.require(id);
     if (enabled === session.previewEnabled) return;
@@ -728,7 +736,9 @@ export class SessionManager {
     if (!session) return;
 
     session.lastActivityAt = this.deps.now();
-    if (event.type === "approval_request") this.setStatus(session, "awaiting_approval");
+    if (event.type === "approval_request" || event.type === "choice_request") {
+      this.setStatus(session, "awaiting_approval");
+    }
     if (event.type === "error") this.setStatus(session, "failed");
 
     this.emit(session, event);
