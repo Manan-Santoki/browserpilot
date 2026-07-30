@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { StatusLabel } from "@/components/status-lamp";
 import { SendIcon } from "lucide-react";
@@ -125,7 +132,16 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
           case "file_ready":
             // msg.url is runtime-relative; the console proxies it so the link
             // carries the user's cookie instead of needing a ticket.
-            append({ kind: "file", filename: msg.filename, url: msg.url });
+            setItems((prev) => {
+              const alreadyShown = prev.some(
+                (item) =>
+                  item.kind === "file" &&
+                  (item.url === msg.url || item.filename === msg.filename),
+              );
+              return alreadyShown
+                ? prev
+                : [...prev, { kind: "file", filename: msg.filename, url: msg.url }];
+            });
             break;
           case "screenshot":
             append({ kind: "screenshot", filename: msg.filename, url: msg.url });
@@ -373,24 +389,25 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
                     Choose one
                   </p>
                   <p className="text-foreground mt-1.5 text-sm">{item.question}</p>
-                  <select
-                    aria-label={item.question}
-                    value={item.resolved?.value ?? ""}
+                  <Select
+                    items={item.options}
+                    value={item.resolved?.value ?? null}
                     disabled={Boolean(item.resolved) || !connected}
-                    onChange={(event) => {
-                      if (event.target.value) choose(item.requestId, event.target.value);
+                    onValueChange={(value) => {
+                      if (value) choose(item.requestId, value);
                     }}
-                    className="border-input bg-background text-foreground mt-3 h-9 w-full rounded-md border px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-70"
                   >
-                    <option value="" disabled>
-                      Select an option…
-                    </option>
-                    {item.options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="mt-3 w-full" aria-label={item.question}>
+                      <SelectValue placeholder="Select an option…" />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      {item.options.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {selected?.description ? (
                     <p className="text-muted-foreground mt-2 text-xs">
                       {selected.description}

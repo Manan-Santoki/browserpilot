@@ -273,8 +273,6 @@ export class SessionManager {
       );
     }
 
-    this.attachDownloads(id, browser, downloadsDir);
-
     let agent: AgentRunner;
     try {
       agent = await this.deps.startAgent({
@@ -294,6 +292,13 @@ export class SessionManager {
       await store.setStatus(id, "failed", `agent start failed: ${(error as Error).message}`);
       throw error;
     }
+    this.attachDownloads(
+      id,
+      browser,
+      downloadsDir,
+      (filename) => agent.downloadDetected(filename),
+      (filename) => agent.downloadCompleted(filename),
+    );
 
     const now = this.deps.now();
     this.sessions.set(id, {
@@ -476,11 +481,20 @@ export class SessionManager {
    * container. The browser can only write to a real path, so the file lands on
    * disk first and is handed to the store from there.
    */
-  private attachDownloads(id: string, browser: RobotBrowser, downloadsDir: string): void {
+  private attachDownloads(
+    id: string,
+    browser: RobotBrowser,
+    downloadsDir: string,
+    onDetected?: (filename: string) => void,
+    onReady?: (filename: string) => void,
+  ): void {
     browser.onDownload((download) => {
       // basename() prevents a hostile suggested filename from escaping the dir.
       const filename = basename(download.suggestedFilename) || "download";
       const staged = join(downloadsDir, filename);
+      // The download event fires as soon as Chromium accepts it. Block another
+      // click immediately, while the bytes finish moving into durable storage.
+      onDetected?.(filename);
 
       void download
         .saveAs(staged)
@@ -491,6 +505,7 @@ export class SessionManager {
           // be announced as ready.
           if (store.kind !== "local") await rm(staged, { force: true }).catch(() => {});
 
+          onReady?.(filename);
           this.handleEvent(id, {
             type: "file_ready",
             fileId: filename,
@@ -647,7 +662,13 @@ export class SessionManager {
     });
     if (!usesSavedLogin) await old.close().catch(() => {});
 
-    this.attachDownloads(id, session.browser, join(this.config.downloadsRoot, id));
+    this.attachDownloads(
+      id,
+      session.browser,
+      join(this.config.downloadsRoot, id),
+      (filename) => session.agent?.downloadDetected(filename),
+      (filename) => session.agent?.downloadCompleted(filename),
+    );
 
     // The agent still holds tools pointed at the old browser's debugging port,
     // so it must be told rather than left to discover the failure mid-task.
@@ -739,6 +760,7 @@ export class SessionManager {
     if (event.type === "approval_request" || event.type === "choice_request") {
       this.setStatus(session, "awaiting_approval");
     }
+    if (event.type === "file_ready") this.setStatus(session, "idle");
     if (event.type === "error") this.setStatus(session, "failed");
 
     this.emit(session, event);

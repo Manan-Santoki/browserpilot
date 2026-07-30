@@ -79,6 +79,14 @@ describe("classifyToolUse", () => {
     expect(classifyToolUse("mcp__playwright__browser_install", {})).toBe("approve");
   });
 
+  test("unsafe arbitrary browser code is denied outright", () => {
+    expect(
+      classifyToolUse("mcp__playwright__browser_run_code_unsafe", {
+        code: "async (page) => page.evaluate(() => document.cookie)",
+      }),
+    ).toBe("deny");
+  });
+
   test("evaluate runs without approval, by explicit choice", () => {
     // Gating it interrupted routine reads far more than it caught risk.
     expect(classifyToolUse("mcp__playwright__browser_evaluate", { fn: "() => 1" })).toBe("auto");

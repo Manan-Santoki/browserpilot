@@ -37,6 +37,9 @@ describe("downloads", () => {
       filename: "PO-2026-0142.pdf",
       url: `/api/sessions/${id}/files/PO-2026-0142.pdf`,
     });
+    expect(state.detectedDownloads).toEqual(["PO-2026-0142.pdf"]);
+    expect(state.completedDownloads).toEqual(["PO-2026-0142.pdf"]);
+    expect(manager.get(id)?.status).toBe("idle");
     expect(saved[0]).toContain("PO-2026-0142.pdf");
 
     await manager.stop(id);

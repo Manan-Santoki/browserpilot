@@ -132,6 +132,8 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
         send: (t: string) => sent.push(t),
         approve: () => {},
         choose: () => {},
+        downloadDetected: () => {},
+        downloadCompleted: () => {},
         stop: async () => {
           closed.agent++;
         },

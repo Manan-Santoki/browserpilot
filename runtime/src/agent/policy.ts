@@ -62,7 +62,12 @@ export function classifyToolUse(
   toolName: string,
   input: Record<string, unknown>,
   destructiveWords?: string[] | null,
-): "auto" | "approve" {
+): "auto" | "approve" | "deny" {
+  // This executes arbitrary JavaScript inside the Playwright server process,
+  // making it equivalent to remote code execution on the runtime host. The
+  // visible browser tools cover BrowserPilot's use cases without it.
+  if (toolName === "mcp__playwright__browser_run_code_unsafe") return "deny";
+
   if (!AUTO_TOOLS.has(toolName)) return "approve";
 
   if (toolName === "mcp__playwright__browser_tabs") {

@@ -46,6 +46,7 @@ function fakeQuery() {
   const emit: Array<() => void> = [];
   const queue: unknown[] = [];
   let done = false;
+  let interrupts = 0;
 
   const queryFn: QueryFn = (params) => {
     captured = params;
@@ -60,7 +61,9 @@ function fakeQuery() {
           await new Promise<void>((r) => emit.push(() => r()));
         }
       },
-      async interrupt() {},
+      async interrupt() {
+        interrupts++;
+      },
       close() {
         done = true;
         emit.splice(0).forEach((fn) => fn());
@@ -72,6 +75,9 @@ function fakeQuery() {
     queryFn,
     get captured() {
       return captured!;
+    },
+    get interrupts() {
+      return interrupts;
     },
     push(message: unknown) {
       queue.push(message);
@@ -224,6 +230,61 @@ describe("startAgent", () => {
 
     expect(result?.behavior).toBe("allow");
     expect(events.some((e) => e.type === "approval_request")).toBe(false);
+    await runner.stop();
+  });
+
+  test("unsafe browser code is denied without asking the user to approve it", async () => {
+    const fake = fakeQuery();
+    const events: RobotEvent[] = [];
+    const runner = await startAgent(
+      { ...OPTS, onEvent: (e) => events.push(e) },
+      { queryFn: fake.queryFn },
+    );
+
+    const result = await fake.captured.options!.canUseTool!(
+      "mcp__playwright__browser_run_code_unsafe",
+      { code: "async (page) => page.evaluate(() => document.cookie)" },
+      permissionOptions(),
+    );
+
+    expect(result?.behavior).toBe("deny");
+    expect(events.some((event) => event.type === "approval_request")).toBe(false);
+    await runner.stop();
+  });
+
+  test("a completed download interrupts the turn and blocks more browser tools", async () => {
+    const fake = fakeQuery();
+    const runner = await startAgent(
+      { ...OPTS, onEvent: () => {} },
+      { queryFn: fake.queryFn },
+    );
+
+    runner.downloadDetected("order.pdf");
+    const blockedWhileSaving = await fake.captured.options!.canUseTool!(
+      "mcp__playwright__browser_click",
+      { element: "Download Order button" },
+      permissionOptions(),
+    );
+    expect(blockedWhileSaving?.behavior).toBe("deny");
+
+    runner.downloadCompleted("order.pdf");
+    await Bun.sleep(10);
+    expect(fake.interrupts).toBe(1);
+
+    const blocked = await fake.captured.options!.canUseTool!(
+      "mcp__playwright__browser_network_requests",
+      { static: false },
+      permissionOptions(),
+    );
+    expect(blocked?.behavior).toBe("deny");
+
+    runner.send("start a different task");
+    const allowed = await fake.captured.options!.canUseTool!(
+      "mcp__playwright__browser_snapshot",
+      {},
+      permissionOptions(),
+    );
+    expect(allowed?.behavior).toBe("allow");
     await runner.stop();
   });
 

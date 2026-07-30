@@ -114,6 +114,8 @@ export type FakeBrowserState = {
   emit?: (event: RobotEvent) => void;
   /** The runner's route for keeping a file, as the manager wired it. */
   saveFile?: (filename: string, bytes: Uint8Array) => Promise<void>;
+  detectedDownloads: string[];
+  completedDownloads: string[];
   sent: string[];
   closed: { browser: number; agent: number; input: number };
   /** What the target answered the opening navigation with. */
@@ -164,6 +166,8 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
     linked: new Set(),
     cookiesInBrowser: [{ name: "session_c", value: "S" }],
     cookiesApplied: [],
+    detectedDownloads: [],
+    completedDownloads: [],
     checkouts: [],
     syncedBack: [],
     dispatched: [],
@@ -206,6 +210,8 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
         send: (t: string) => state.sent.push(t),
         approve: () => {},
         choose: () => {},
+        downloadDetected: (filename: string) => state.detectedDownloads.push(filename),
+        downloadCompleted: (filename: string) => state.completedDownloads.push(filename),
         stop: async () => {
           state.closed.agent++;
         },
