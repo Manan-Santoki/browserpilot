@@ -121,6 +121,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
         page: { url: () => landingUrl } as never,
         context: {} as never,
         onDownload: () => {},
+        onClose: () => {},
         close: async () => {
           closed.browser++;
         },
@@ -229,6 +230,24 @@ describe("starting a session", () => {
     // Crucially it must not keep counting against the concurrency cap.
     expect(await store.liveSessionCount(userId)).toBe(0);
     await cleanupSessions();
+  });
+
+  test("a transient browser launch failure is retried once", async () => {
+    const { deps } = makeDeps();
+    const launch = deps.launchBrowser;
+    let attempts = 0;
+    deps.launchBrowser = async (args) => {
+      attempts++;
+      if (attempts === 1) throw new Error("temporary Chromium spawn failure");
+      return launch(args);
+    };
+    const manager = new SessionManager(config, deps);
+
+    const id = await manager.create(userId, siteId);
+
+    expect(attempts).toBe(2);
+    expect(manager.get(id)?.status).toBe("idle");
+    await manager.stop(id);
   });
 });
 

@@ -12,6 +12,12 @@ afterAll(async () => {
   await fx.cleanup();
 });
 
+async function waitFor(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) await Bun.sleep(25);
+  expect(condition()).toBe(true);
+}
+
 describe("live preview", () => {
   test("enabling preview starts the screencast once", async () => {
     const { deps, state } = fakeDeps();
@@ -71,6 +77,69 @@ describe("live preview", () => {
     manager.subscribeFrames(id, (f) => late.push(f));
 
     expect(late).toEqual([]);
+    // A Playwright MCP worker is tied to one CDP port, so recovery must replace
+    // the agent as well as Chromium.
+    expect(state.browserLaunches).toBe(2);
+    expect(state.agentStarts).toBe(2);
+    expect(state.closed.agent).toBe(1);
+    await manager.stop(id);
+  });
+
+  test("an unexpected Chromium exit recovers the browser, agent, task, and preview", async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+    const activity: string[] = [];
+    manager.subscribe(id, (event) => {
+      if (event.type === "tool_activity") activity.push(event.summary);
+    });
+
+    manager.send(id, "search flights from PHX to Denver");
+    await manager.setPreview(id, true);
+    state.fireBrowserClose!();
+
+    await waitFor(
+      () =>
+        state.agentStarts === 2 &&
+        manager.get(id)?.previewEnabled === true &&
+        manager.get(id)?.restartingBrowser !== true,
+    );
+
+    expect(state.browserLaunches).toBe(2);
+    expect(state.agentStarts).toBe(2);
+    expect(state.closed.agent).toBe(1);
+    expect(state.screencastStarts).toBe(2);
+    expect(manager.get(id)?.previewEnabled).toBe(true);
+    expect(manager.get(id)?.status).toBe("working");
+    expect(state.sent[1]).toContain("search flights from PHX to Denver");
+    expect(activity).toContain("Browser exited and recovered automatically");
+    await manager.stop(id);
+  });
+
+  test("automatic browser recovery stops after two consecutive exits", async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new SessionManager(managerConfig, deps);
+    const id = await manager.create(fx.userId, fx.siteId);
+    const errors: string[] = [];
+    manager.subscribe(id, (event) => {
+      if (event.type === "error") errors.push(event.message);
+    });
+
+    state.fireBrowserClose!();
+    await waitFor(
+      () => state.agentStarts === 2 && manager.get(id)?.restartingBrowser !== true,
+    );
+    state.fireBrowserClose!();
+    await waitFor(
+      () => state.agentStarts === 3 && manager.get(id)?.restartingBrowser !== true,
+    );
+    state.fireBrowserClose!();
+    await waitFor(() => errors.length > 0);
+
+    expect(state.browserLaunches).toBe(3);
+    expect(state.agentStarts).toBe(3);
+    expect(manager.get(id)?.status).toBe("failed");
+    expect(errors.at(-1)).toContain("exited repeatedly");
     await manager.stop(id);
   });
 

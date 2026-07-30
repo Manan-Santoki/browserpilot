@@ -55,6 +55,8 @@ export type RobotBrowser = {
   page: Page;
   context: BrowserContext;
   onDownload(handler: DownloadHandler): void;
+  /** Called if Chromium exits or the context is otherwise closed. */
+  onClose(handler: () => void): void;
   close(): Promise<void>;
 };
 
@@ -138,6 +140,19 @@ export async function launchRobotBrowser(opts: LaunchOptions): Promise<RobotBrow
           saveAs: (path: string) => download.saveAs(path),
         });
       });
+    },
+    onClose(handler: () => void) {
+      // A deliberate context.close() emits "close", but an OS-level Chromium
+      // crash only disconnects the owning Browser. Listen to both and collapse
+      // them into one lifecycle signal so session recovery covers either path.
+      let handled = false;
+      const notify = () => {
+        if (handled) return;
+        handled = true;
+        handler();
+      };
+      context.once("close", notify);
+      context.browser()?.once("disconnected", notify);
     },
     async close() {
       await context.close();
