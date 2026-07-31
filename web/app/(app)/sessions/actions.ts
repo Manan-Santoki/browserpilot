@@ -4,7 +4,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
-import { restartRuntimeBrowser, startRuntimeSession, stopRuntimeSession } from "@/lib/runtime";
+import {
+  restartRuntimeBrowser,
+  resumeRuntimeSession,
+  startRuntimeSession,
+  stopRuntimeSession,
+} from "@/lib/runtime";
 
 export type StartState = {
   error?: string;
@@ -74,4 +79,25 @@ export async function restartBrowser(formData: FormData): Promise<void> {
 
   await restartRuntimeBrowser(user, sessionId);
   revalidatePath(`/sessions/${sessionId}`);
+}
+
+export async function resumeSession(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const sourceSessionId = String(formData.get("sessionId") ?? "");
+  if (!sourceSessionId) return;
+
+  const result = await resumeRuntimeSession(user, sourceSessionId);
+  if (!result.ok) {
+    redirect(`/sessions/${sourceSessionId}?resumeError=${encodeURIComponent(result.error)}`);
+  }
+
+  await audit({
+    actorUserId: user.id,
+    action: "session.resumed",
+    targetType: "session",
+    targetId: result.data.id,
+    metadata: { resumedFromSessionId: sourceSessionId, from: "web" },
+  });
+
+  redirect(`/sessions/${result.data.id}`);
 }

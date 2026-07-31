@@ -1,6 +1,7 @@
 import { settings } from "@browserpilot/db";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { availableModels, modelsIncluding } from "@/lib/models";
 import { SettingsForm } from "./form";
 
 const DEFAULTS = {
@@ -8,7 +9,6 @@ const DEFAULTS = {
   globalSessionLimit: 8,
   idleTimeoutMs: 600_000,
   hardCapMs: 3_600_000,
-  defaultModel: "claude-opus-5",
 };
 
 export default async function SettingsPage() {
@@ -17,12 +17,17 @@ export default async function SettingsPage() {
   const rows = await db().select().from(settings);
   const stored = Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
+  // Before an admin has chosen, the head of the catalogue is what the runtime
+  // would fall back to — so the form shows the same answer the agent uses.
+  const catalogue = availableModels();
+  const defaultModel = String(stored.defaultModel ?? catalogue[0]?.value ?? "");
+
   const current = {
     perUserSessionLimit: Number(stored.perUserSessionLimit ?? DEFAULTS.perUserSessionLimit),
     globalSessionLimit: Number(stored.globalSessionLimit ?? DEFAULTS.globalSessionLimit),
     idleTimeoutMs: Number(stored.idleTimeoutMs ?? DEFAULTS.idleTimeoutMs),
     hardCapMs: Number(stored.hardCapMs ?? DEFAULTS.hardCapMs),
-    defaultModel: String(stored.defaultModel ?? DEFAULTS.defaultModel),
+    defaultModel,
   };
 
   return (
@@ -35,7 +40,7 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForm current={current} />
+      <SettingsForm current={current} models={modelsIncluding(defaultModel)} />
     </div>
   );
 }

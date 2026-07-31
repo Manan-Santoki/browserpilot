@@ -73,6 +73,8 @@ afterAll(async () => {
 function makeDeps(overrides: Partial<ManagerDeps> = {}) {
   const launched: Array<{ targetUrl: string; user: Record<string, string> }> = [];
   const sent: string[] = [];
+  const sentVoiceTaskIds: Array<string | undefined> = [];
+  let interrupts = 0;
   const closed = { browser: 0, agent: 0, input: 0 };
   const linked = new Set<string>();
   const checkouts: string[] = [];
@@ -130,9 +132,15 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
     startAgent: async (args) => {
       emit = args.onEvent;
       return {
-        send: (t: string) => sent.push(t),
+        send: (t: string, voiceTaskId?: string) => {
+          sent.push(t);
+          sentVoiceTaskIds.push(voiceTaskId);
+        },
         approve: () => {},
         choose: () => {},
+        interrupt: async () => {
+          interrupts++;
+        },
         downloadDetected: () => {},
         downloadCompleted: () => {},
         stop: async () => {
@@ -148,6 +156,8 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
     deps,
     launched,
     sent,
+    sentVoiceTaskIds,
+    interrupts: () => interrupts,
     closed,
     linked,
     checkouts,
@@ -303,7 +313,137 @@ describe("ownership", () => {
   });
 });
 
+describe("resuming an ended session", () => {
+  test("creates a linked run at the last safe URL with a guarded context handoff", async () => {
+    const { deps, launched, sent, fire, landOn } = makeDeps();
+    const manager = new SessionManager(config, deps);
+    const sourceId = await manager.create(userId, siteId, "finish the order", "resume-model");
+
+    landOn("https://target.test/orders/42");
+    manager.send(sourceId, "Finish order 42");
+    fire({ type: "agent_text", text: "I opened order 42 and checked its current status." });
+    fire({
+      type: "approval_request",
+      requestId: "old-approval",
+      tool: "browser_click",
+      summary: "Submit the order",
+    });
+    await manager.stop(sourceId);
+
+    const resumedId = await manager.resume(sourceId);
+
+    expect(resumedId).not.toBe(sourceId);
+    expect(launched[1]?.targetUrl).toBe("https://target.test/orders/42");
+    expect(sent.at(-1)).toContain("Latest recorded user request: Finish order 42");
+    expect(sent.at(-1)).toContain("Do not repeat a submission");
+    expect(sent.at(-1)).toContain("I opened order 42");
+    expect(sent.at(-1)).not.toContain("Submit the order");
+    expect(manager.get(resumedId)?.status).toBe("working");
+    expect(manager.get(resumedId)?.model).toBe("resume-model");
+
+    const [source] = await db
+      .select()
+      .from(robotSessions)
+      .where(eq(robotSessions.id, sourceId));
+    const [resumed] = await db
+      .select()
+      .from(robotSessions)
+      .where(eq(robotSessions.id, resumedId));
+    expect(source?.status).toBe("stopped");
+    expect(resumed?.resumedFromSessionId).toBe(sourceId);
+    expect(resumed?.lastUrl).toBe("https://target.test/orders/42");
+    expect(resumed?.lastUserMessage).toBe("Finish order 42");
+    expect(resumed?.model).toBe("resume-model");
+
+    await manager.stop(resumedId);
+    await expect(manager.resume(sourceId)).rejects.toThrow(/already been continued/i);
+    await cleanupSessions();
+  }, DB_HEAVY_TIMEOUT_MS);
+
+  test("does not resume a live session or a sign-in session", async () => {
+    const { deps } = makeDeps();
+    const manager = new SessionManager(config, deps);
+    const liveId = await manager.create(userId, siteId);
+
+    await expect(manager.resume(liveId)).rejects.toThrow(/ended robot session/i);
+
+    await manager.stop(liveId);
+    const loginId = await manager.createLogin(userId, siteId);
+    await manager.stop(loginId);
+    await expect(manager.resume(loginId)).rejects.toThrow(/ended robot session/i);
+    await cleanupSessions();
+  }, DB_HEAVY_TIMEOUT_MS);
+});
+
 describe("events and lifecycle", () => {
+  test("a voice task is acknowledged once, correlated, and returns the session to idle", async () => {
+    const { deps, fire, sent, sentVoiceTaskIds } = makeDeps();
+    const manager = new SessionManager(config, deps);
+    const id = await manager.create(userId, siteId);
+    const seen: RobotEvent[] = [];
+    manager.subscribe(id, (event) => seen.push(event));
+
+    manager.startVoiceTask(id, "gemini_call_1", "Open the latest order");
+    manager.startVoiceTask(id, "gemini_call_1", "Open the latest order");
+
+    expect(sent).toEqual(["Open the latest order"]);
+    expect(sentVoiceTaskIds).toEqual(["gemini_call_1"]);
+    expect(manager.get(id)?.status).toBe("working");
+    expect(seen).toContainEqual({
+      type: "user_msg",
+      text: "Open the latest order",
+      voiceTaskId: "gemini_call_1",
+    });
+    expect(
+      seen.filter(
+        (event) =>
+          event.type === "voice_command_result" &&
+          event.requestId === "gemini_call_1" &&
+          event.ok,
+      ),
+    ).toHaveLength(2);
+
+    fire({
+      type: "agent_turn_complete",
+      outcome: "completed",
+      voiceTaskId: "gemini_call_1",
+    });
+    expect(manager.get(id)?.status).toBe("idle");
+
+    await manager.stop(id);
+    await cleanupSessions();
+  });
+
+  test("voice cannot start a second task while Claude is busy and can explicitly interrupt", async () => {
+    const { deps, interrupts } = makeDeps();
+    const manager = new SessionManager(config, deps);
+    const id = await manager.create(userId, siteId);
+    const seen: RobotEvent[] = [];
+    manager.subscribe(id, (event) => seen.push(event));
+
+    manager.startVoiceTask(id, "gemini_call_1", "Open orders");
+    manager.startVoiceTask(id, "gemini_call_2", "Open customers");
+    expect(
+      seen.find(
+        (event) =>
+          event.type === "voice_command_result" && event.requestId === "gemini_call_2",
+      ),
+    ).toMatchObject({ type: "voice_command_result", ok: false, status: "busy" });
+
+    await manager.interruptVoiceTask(id, "gemini_stop_1");
+    expect(interrupts()).toBe(1);
+    expect(manager.get(id)?.status).toBe("idle");
+    expect(
+      seen.find(
+        (event) =>
+          event.type === "voice_command_result" && event.requestId === "gemini_stop_1",
+      ),
+    ).toMatchObject({ type: "voice_command_result", ok: true, status: "accepted" });
+
+    await manager.stop(id);
+    await cleanupSessions();
+  });
+
   test("agent events reach subscribers and are persisted for replay", async () => {
     const { deps, fire } = makeDeps();
     const manager = new SessionManager(config, deps);
@@ -398,5 +538,5 @@ describe("events and lifecycle", () => {
     const [row] = await db.select().from(robotSessions).where(eq(robotSessions.id, id));
     expect(row?.endedReason).toBe("maximum duration reached");
     await cleanupSessions();
-  });
+  }, DB_HEAVY_TIMEOUT_MS);
 });

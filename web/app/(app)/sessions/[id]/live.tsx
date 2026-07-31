@@ -17,6 +17,12 @@ import { SendIcon } from "lucide-react";
 import { AgentMarkdown } from "@/components/agent-markdown";
 import { BrowserStream, type BrowserStreamHandle } from "@/components/browser-stream";
 import { PushToTalk } from "./push-to-talk";
+import {
+  LiveVoice,
+  type LiveVoiceHandle,
+  type LiveVoiceTranscript,
+  type VoiceCommandResult,
+} from "./live-voice";
 
 import type { ChatItem } from "@/lib/transcript";
 
@@ -42,6 +48,20 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<BrowserStreamHandle | null>(null);
+  const liveVoiceRef = useRef<LiveVoiceHandle | null>(null);
+  // Gemini can flush the user's speech and its reply in the same tick. Keep
+  // writes serialized so the durable event sequence still matches what the
+  // user heard.
+  const voiceTranscriptWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const voiceWaitersRef = useRef(
+    new Map<
+      string,
+      {
+        resolve: (result: VoiceCommandResult) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >(),
+  );
 
   const append = useCallback((item: ChatItem) => setItems((prev) => [...prev, item]), []);
 
@@ -99,6 +119,15 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
       };
       opened.onclose = () => {
         setConnected(false);
+        for (const waiter of voiceWaitersRef.current.values()) {
+          clearTimeout(waiter.timer);
+          waiter.resolve({
+            ok: false,
+            status: "failed",
+            message: "The browser session disconnected before it answered.",
+          });
+        }
+        voiceWaitersRef.current.clear();
         if (closed) return; // we navigated away; nothing to explain
         void explainClosure().then((explained) => {
           if (!explained) setStatus((s) => (s === "stopped" ? s : "disconnected"));
@@ -113,7 +142,11 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
         }
 
         const msg = JSON.parse(event.data as string);
+        liveVoiceRef.current?.handleRuntimeEvent(msg);
         switch (msg.type) {
+          case "user_msg":
+            append({ kind: "you", text: msg.text });
+            break;
           case "agent_text":
             append({ kind: "agent", text: msg.text });
             break;
@@ -181,6 +214,19 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
               ),
             );
             break;
+          case "voice_command_result": {
+            const waiter = voiceWaitersRef.current.get(msg.requestId);
+            if (waiter) {
+              clearTimeout(waiter.timer);
+              voiceWaitersRef.current.delete(msg.requestId);
+              waiter.resolve({
+                ok: Boolean(msg.ok),
+                status: msg.status,
+                message: msg.message,
+              });
+            }
+            break;
+          }
         }
       };
     }
@@ -213,6 +259,87 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
   const choose = (requestId: string, value: string) => {
     wsRef.current?.send(JSON.stringify({ type: "choice", requestId, value }));
   };
+
+  const sendVoiceCommand = useCallback(
+    (
+      command:
+        | { type: "voice_task_start"; requestId: string; text: string }
+        | { type: "agent_interrupt"; requestId: string },
+    ): Promise<VoiceCommandResult> =>
+      new Promise((resolve) => {
+        const socket = wsRef.current;
+        if (socket?.readyState !== WebSocket.OPEN) {
+          resolve({
+            ok: false,
+            status: "failed",
+            message: "The browser session is not connected.",
+          });
+          return;
+        }
+        const timer = setTimeout(() => {
+          voiceWaitersRef.current.delete(command.requestId);
+          resolve({
+            ok: false,
+            status: "failed",
+            message: "The browser agent did not acknowledge the voice command.",
+          });
+        }, 5_000);
+        voiceWaitersRef.current.set(command.requestId, { resolve, timer });
+        socket.send(JSON.stringify(command));
+      }),
+    [],
+  );
+
+  const submitVoiceChoice = useCallback((requestId: string, optionId: string) => {
+    const socket = wsRef.current;
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ type: "choice", requestId, value: optionId }));
+    return true;
+  }, []);
+
+  const recordVoiceTranscript = useCallback(
+    (message: LiveVoiceTranscript) => {
+      append({
+        kind: message.speaker === "assistant" ? "voice_assistant" : "voice_user",
+        text: message.text,
+        inputModality: message.inputModality,
+        outputModality: message.outputModality,
+      });
+
+      voiceTranscriptWriteRef.current = voiceTranscriptWriteRef.current
+        .catch(() => {
+          // A failed message must not prevent later transcript writes.
+        })
+        .then(async () => {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+              const response = await fetch(`/api/sessions/${sessionId}/transcript`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ kind: "transcript", ...message }),
+              });
+              if (response.ok) return;
+            } catch {
+              // Retry below. The message remains visible locally in the meantime.
+            }
+            await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** attempt));
+          }
+          console.error("[live_voice] transcript.save_failed", message.messageId);
+        });
+    },
+    [append, sessionId],
+  );
+
+  const logVoiceTelemetry = useCallback(
+    (event: string, detail?: string, level: "info" | "warn" | "error" = "info") => {
+      void fetch(`/api/sessions/${sessionId}/transcript`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "telemetry", event, detail, level }),
+      }).catch(() => {});
+    },
+    [sessionId],
+  );
 
   // Identity-stable, so resizing does not tear down the observer each render.
   const reportSize = useCallback((cssWidth: number, pixelRatio: number) => {
@@ -331,6 +458,28 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             }
             if (item.kind === "agent") {
               return <AgentMarkdown key={i}>{item.text}</AgentMarkdown>;
+            }
+            if (item.kind === "voice_user") {
+              return (
+                <div key={i} className="text-right">
+                  <p className="text-muted-foreground mb-1 text-[10px] tracking-wide uppercase">
+                    Voice · {item.inputModality} → {item.outputModality}
+                  </p>
+                  <p className="bg-secondary text-secondary-foreground inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-left">
+                    {item.text}
+                  </p>
+                </div>
+              );
+            }
+            if (item.kind === "voice_assistant") {
+              return (
+                <div key={i} className="border-signal/25 bg-signal/5 rounded-lg border px-3 py-2">
+                  <p className="text-signal mb-1 text-[10px] tracking-wide uppercase">
+                    Gemini Live · {item.inputModality} → {item.outputModality}
+                  </p>
+                  <AgentMarkdown>{item.text}</AgentMarkdown>
+                </div>
+              );
             }
             if (item.kind === "tool") {
               // The activity feed is a machine log, so it is set as one — mono,
@@ -452,6 +601,25 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
         </div>
 
         <form onSubmit={send} className="flex shrink-0 items-center gap-2 border-t p-2.5">
+          <LiveVoice
+            ref={liveVoiceRef}
+            sessionId={sessionId}
+            runtimeConnected={connected}
+            runtimeStatus={status}
+            startBrowserTask={(requestId, instruction) =>
+              sendVoiceCommand({
+                type: "voice_task_start",
+                requestId,
+                text: instruction,
+              })
+            }
+            interruptBrowserTask={(requestId) =>
+              sendVoiceCommand({ type: "agent_interrupt", requestId })
+            }
+            submitChoice={submitVoiceChoice}
+            recordTranscript={recordVoiceTranscript}
+            logTelemetry={logVoiceTelemetry}
+          />
           <PushToTalk
             language={language}
             disabled={!connected}

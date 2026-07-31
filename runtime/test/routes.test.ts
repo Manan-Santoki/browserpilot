@@ -11,7 +11,14 @@ import { mintTicket } from "@browserpilot/core";
 import { createServer } from "../src/http/routes";
 import { SessionManager } from "../src/session/manager";
 import type { RobotEvent } from "../src/session/events";
-import { createFixtures, fakeDeps, managerConfig, store, type Fixtures } from "./helpers";
+import {
+  createFixtures,
+  DB_HEAVY_TIMEOUT_MS,
+  fakeDeps,
+  managerConfig,
+  store,
+  type Fixtures,
+} from "./helpers";
 
 const TICKET_SECRET = "routes-ticket-secret";
 let fx: Fixtures;
@@ -291,6 +298,34 @@ describe("restarting a browser", () => {
     expect(res.status).toBe(403);
     await manager.stop(id);
   });
+});
+
+describe("resuming an ended session", () => {
+  test("only the owner can create a linked continuation", async () => {
+    const { port, manager, state } = start();
+    const sourceId = await manager.create(fx.userId, fx.siteId, "resume route");
+    manager.send(sourceId, "Continue my work");
+    await manager.stop(sourceId);
+
+    const denied = await fetch(`http://127.0.0.1:${port}/api/sessions/${sourceId}/resume`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ticketFor(sourceId, fx.otherUserId)}` },
+    });
+    expect(denied.status).toBe(403);
+
+    const allowed = await fetch(`http://127.0.0.1:${port}/api/sessions/${sourceId}/resume`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ticketFor(sourceId, fx.userId)}` },
+    });
+    expect(allowed.status).toBe(200);
+    const body = (await allowed.json()) as { id: string; resumedFromSessionId: string };
+    expect(body.resumedFromSessionId).toBe(sourceId);
+    expect(body.id).not.toBe(sourceId);
+    expect(manager.get(body.id)?.status).toBe("working");
+    expect(state.sent.at(-1)).toContain("Continue my work");
+
+    await manager.stop(body.id);
+  }, DB_HEAVY_TIMEOUT_MS);
 });
 
 describe("model selection", () => {

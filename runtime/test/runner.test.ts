@@ -181,6 +181,58 @@ describe("startAgent", () => {
     }
   });
 
+  test("an ambient base URL cannot redirect the agent to another provider", async () => {
+    // The nastiest version of this: a developer exports ANTHROPIC_BASE_URL for
+    // some unrelated tool, and every session's model traffic quietly goes
+    // there. Nothing errors — the answers are just subtly wrong.
+    const ambient = {
+      ANTHROPIC_BASE_URL: "https://someone-elses-gateway.example",
+      ANTHROPIC_AUTH_TOKEN: "sk-ambient",
+      ANTHROPIC_MODEL: "some-other-model",
+    };
+    const previous = Object.fromEntries(
+      Object.keys(ambient).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, ambient);
+
+    try {
+      const fake = fakeQuery();
+      const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+      const env = fake.captured.options!.env as Record<string, string>;
+
+      for (const key of Object.keys(ambient)) expect(env[key]).toBeUndefined();
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("t");
+      // The model is an SDK option, so it stays authoritative either way.
+      expect(fake.captured.options!.model).toBe("claude-opus-5");
+
+      await runner.stop();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  test("a configured gateway reaches the subprocess intact", async () => {
+    const fake = fakeQuery();
+    const runner = await startAgent(
+      {
+        ...OPTS,
+        env: { ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go", ANTHROPIC_AUTH_TOKEN: "sk-x" },
+        onEvent: () => {},
+      },
+      { queryFn: fake.queryFn },
+    );
+    const env = fake.captured.options!.env as Record<string, string>;
+
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://opencode.ai/zen/go");
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("sk-x");
+    expect(typeof env.PATH).toBe("string");
+
+    await runner.stop();
+  });
+
   test("emits assistant text as agent_text events", async () => {
     const fake = fakeQuery();
     const events: RobotEvent[] = [];

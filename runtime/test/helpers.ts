@@ -120,6 +120,7 @@ export type FakeBrowserState = {
   completedDownloads: string[];
   sent: string[];
   agentStarts: number;
+  agentInterrupts: number;
   closed: { browser: number; agent: number; input: number };
   /** What the target answered the opening navigation with. */
   landingUrl: string;
@@ -166,6 +167,7 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
     resizes: [],
     sent: [],
     agentStarts: 0,
+    agentInterrupts: 0,
     closed: { browser: 0, agent: 0, input: 0 },
     landingUrl: "https://target.test/dashboard",
     linked: new Set(),
@@ -223,6 +225,9 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
         send: (t: string) => state.sent.push(t),
         approve: () => {},
         choose: () => {},
+        interrupt: async () => {
+          state.agentInterrupts++;
+        },
         downloadDetected: (filename: string) => state.detectedDownloads.push(filename),
         downloadCompleted: (filename: string) => state.completedDownloads.push(filename),
         stop: async () => {

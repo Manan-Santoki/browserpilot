@@ -12,6 +12,7 @@
     "dev:runtime": "cd runtime && bun run dev",
     "dev:web": "cd web && bun run dev",
     "test": "bun test core db runtime",
+    "check:provider": "cd runtime && bun run check:provider",
     "db:generate": "cd db && bunx drizzle-kit generate",
     "db:migrate": "cd db && bunx drizzle-kit migrate",
     "dev:mobile": "cd mobile && bun run start"

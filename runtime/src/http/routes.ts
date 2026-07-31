@@ -52,6 +52,8 @@ const STATUS_FOR: Record<SessionError["code"], number> = {
   global_limit: 429,
   not_linked: 409,
   login_expired: 409,
+  unknown_session: 404,
+  not_resumable: 409,
 };
 
 export function createServer(manager: SessionManager, opts: ServerOptions) {
@@ -248,6 +250,26 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         }
       }
 
+      const resumeMatch = /^\/api\/sessions\/([^/]+)\/resume$/.exec(path);
+      if (resumeMatch && req.method === "POST") {
+        const sourceId = resumeMatch[1]!;
+        const source = await opts.store.resumableSession(sourceId);
+        if (!source) return json({ error: "No such session" }, 404);
+        if (claims.role !== "ADMIN" && source.userId !== claims.userId) {
+          return json({ error: "Not your session" }, 403);
+        }
+
+        try {
+          const id = await manager.resume(sourceId);
+          return json({ id, resumedFromSessionId: sourceId });
+        } catch (error) {
+          if (error instanceof SessionError) {
+            return json({ error: error.message, code: error.code }, STATUS_FOR[error.code]);
+          }
+          return json({ error: (error as Error).message }, 500);
+        }
+      }
+
       const fileListMatch = /^\/api\/sessions\/([^/]+)\/files$/.exec(path);
       if (fileListMatch && req.method === "GET") {
         const sessionId = fileListMatch[1]!;
@@ -370,6 +392,12 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         switch (command.type) {
           case "user_msg":
             manager.send(id, command.text);
+            break;
+          case "voice_task_start":
+            manager.startVoiceTask(id, command.requestId, command.text);
+            break;
+          case "agent_interrupt":
+            void manager.interruptVoiceTask(id, command.requestId);
             break;
           case "approval":
             manager.approve(id, command.requestId, command.approved);

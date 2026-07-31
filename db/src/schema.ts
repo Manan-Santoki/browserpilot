@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -191,10 +192,24 @@ export const robotSessions = pgTable(
     endedReason: text("ended_reason"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
     title: text("title"),
+    /** Atomically incremented when a durable transcript event is appended. */
+    eventSeq: integer("event_seq").notNull().default(0),
+    /** The finished run this one continues. Kept as lineage rather than rewriting history. */
+    resumedFromSessionId: uuid("resumed_from_session_id").references(
+      (): AnyPgColumn => robotSessions.id,
+      { onDelete: "set null" },
+    ),
+    /** Fixed for a run, and reused by a continuation unless the user chooses another. */
+    model: text("model"),
+    /** Best-effort browser checkpoint. A continuation still verifies the page before acting. */
+    lastUrl: text("last_url"),
+    /** Last explicit request, used to identify unfinished work without replaying approvals. */
+    lastUserMessage: text("last_user_message"),
   },
   (t) => [
     index("robot_sessions_user_id_idx").on(t.userId),
     index("robot_sessions_status_idx").on(t.status),
+    uniqueIndex("robot_sessions_resumed_from_key").on(t.resumedFromSessionId),
   ],
 );
 

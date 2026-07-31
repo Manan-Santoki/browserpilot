@@ -1,0 +1,1 @@
+ALTER TABLE "robot_sessions" ADD COLUMN "event_seq" integer DEFAULT 0 NOT NULL;

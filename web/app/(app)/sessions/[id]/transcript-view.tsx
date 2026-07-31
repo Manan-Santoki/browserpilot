@@ -30,6 +30,28 @@ export function TranscriptView({ items }: { items: ChatItem[] }) {
         if (item.kind === "agent") {
           return <AgentMarkdown key={i}>{item.text}</AgentMarkdown>;
         }
+        if (item.kind === "voice_user") {
+          return (
+            <div key={i} className="text-right">
+              <p className="text-muted-foreground mb-1 text-[10px] tracking-wide uppercase">
+                Voice · {item.inputModality} → {item.outputModality}
+              </p>
+              <p className="bg-secondary text-secondary-foreground inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-left">
+                {item.text}
+              </p>
+            </div>
+          );
+        }
+        if (item.kind === "voice_assistant") {
+          return (
+            <div key={i} className="border-signal/25 bg-signal/5 rounded-lg border px-3 py-2">
+              <p className="text-signal mb-1 text-[10px] tracking-wide uppercase">
+                Gemini Live · {item.inputModality} → {item.outputModality}
+              </p>
+              <AgentMarkdown>{item.text}</AgentMarkdown>
+            </div>
+          );
+        }
         if (item.kind === "tool") {
           return (
             <p key={i} className="text-muted-foreground/80 font-mono text-xs">

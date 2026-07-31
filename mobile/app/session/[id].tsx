@@ -11,13 +11,27 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { useLocalSearchParams, useNavigation } from "expo-router";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { getTicket, stopSession } from "../../lib/api";
+import {
+  getSessionStatus,
+  getTicket,
+  getTranscript,
+  logVoiceTelemetry as postVoiceTelemetry,
+  resumeSession,
+  saveVoiceTranscript,
+  stopSession,
+  type VoiceTranscriptMessage,
+} from "../../lib/api";
 import { colour, radius, space, type } from "../../lib/theme";
 import { Button, Mono, Notice, StatusLamp } from "../../components/ui";
 import { AgentMarkdown } from "../../components/agent-markdown";
+import {
+  MobileLiveVoice,
+  type MobileLiveVoiceHandle,
+  type VoiceCommandResult,
+} from "../../components/live-voice";
 import {
   LivePreview,
   type LivePreviewHandle,
@@ -26,9 +40,22 @@ import {
 type Item =
   | { kind: "you"; text: string }
   | { kind: "agent"; text: string }
+  | {
+      kind: "voice_user";
+      text: string;
+      inputModality: "text" | "audio";
+      outputModality: "text" | "audio";
+    }
+  | {
+      kind: "voice_assistant";
+      text: string;
+      inputModality: "text" | "audio";
+      outputModality: "text" | "audio";
+    }
   | { kind: "tool"; text: string }
   | { kind: "error"; text: string }
   | { kind: "file"; filename: string }
+  | { kind: "screenshot"; filename: string; url: string }
   | { kind: "approval"; requestId: string; summary: string; resolved?: string }
   | {
       kind: "choice";
@@ -50,6 +77,7 @@ type Item =
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
@@ -60,6 +88,8 @@ export default function SessionScreen() {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+  const [continuationId, setContinuationId] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
   /**
    * A phone has no room to show a browser and a conversation at once and do
    * either well. Tapping the browser gives it the whole screen — which is what
@@ -74,6 +104,19 @@ export default function SessionScreen() {
   const socketRef = useRef<WebSocket | null>(null);
   const logRef = useRef<ScrollView | null>(null);
   const previewRef = useRef<LivePreviewHandle | null>(null);
+  const liveVoiceRef = useRef<MobileLiveVoiceHandle | null>(null);
+  // Input and output transcripts may complete together. Serialize their API
+  // writes so the server-side event sequence preserves conversation order.
+  const voiceTranscriptWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const voiceWaitersRef = useRef(
+    new Map<
+      string,
+      {
+        resolve: (result: VoiceCommandResult) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >(),
+  );
 
   const append = useCallback((item: Item) => setItems((prev) => [...prev, item]), []);
 
@@ -100,9 +143,27 @@ export default function SessionScreen() {
   useEffect(() => {
     let closed = false;
     let socket: WebSocket | undefined;
+    setEnded(false);
+    setContinuationId(null);
+    setConnected(false);
+    setItems([]);
+    setError(null);
 
     async function connect() {
       try {
+        const [details, transcript] = await Promise.all([
+          getSessionStatus(String(id)),
+          getTranscript<Item>(String(id)),
+        ]);
+        if (closed) return;
+        setItems(transcript.items);
+        setStatus(details.status);
+        setContinuationId(details.continuationId);
+        if (["stopped", "failed", "interrupted"].includes(details.status)) {
+          setEnded(true);
+          return;
+        }
+
         const { url } = await getTicket(String(id));
         if (closed) return;
 
@@ -116,7 +177,18 @@ export default function SessionScreen() {
           setConnected(true);
           socket?.send(JSON.stringify({ type: "preview", enabled: true }));
         };
-        socket.onclose = () => setConnected(false);
+        socket.onclose = () => {
+          setConnected(false);
+          for (const waiter of voiceWaitersRef.current.values()) {
+            clearTimeout(waiter.timer);
+            waiter.resolve({
+              ok: false,
+              status: "failed",
+              message: "The browser session disconnected before it answered.",
+            });
+          }
+          voiceWaitersRef.current.clear();
+        };
         socket.onerror = () => setConnected(false);
 
         socket.onmessage = (event) => {
@@ -130,9 +202,13 @@ export default function SessionScreen() {
             return;
           }
 
+          liveVoiceRef.current?.handleRuntimeEvent(msg);
           switch (msg.type) {
             case "frame":
               previewRef.current?.push(String(msg.data));
+              break;
+            case "user_msg":
+              append({ kind: "you", text: String(msg.text) });
               break;
             case "agent_text":
               append({ kind: "agent", text: String(msg.text) });
@@ -197,6 +273,20 @@ export default function SessionScreen() {
                 setEnded(true);
               }
               break;
+            case "voice_command_result": {
+              const requestId = String(msg.requestId);
+              const waiter = voiceWaitersRef.current.get(requestId);
+              if (waiter) {
+                clearTimeout(waiter.timer);
+                voiceWaitersRef.current.delete(requestId);
+                waiter.resolve({
+                  ok: Boolean(msg.ok),
+                  status: String(msg.status) as VoiceCommandResult["status"],
+                  message: String(msg.message),
+                });
+              }
+              break;
+            }
           }
         };
       } catch (e) {
@@ -225,6 +315,94 @@ export default function SessionScreen() {
 
   const choose = (requestId: string, value: string) => {
     socketRef.current?.send(JSON.stringify({ type: "choice", requestId, value }));
+  };
+
+  const sendVoiceCommand = useCallback(
+    (
+      command:
+        | { type: "voice_task_start"; requestId: string; text: string }
+        | { type: "agent_interrupt"; requestId: string },
+    ): Promise<VoiceCommandResult> =>
+      new Promise((resolve) => {
+        const socket = socketRef.current;
+        if (socket?.readyState !== WebSocket.OPEN) {
+          resolve({
+            ok: false,
+            status: "failed",
+            message: "The browser session is not connected.",
+          });
+          return;
+        }
+        const timer = setTimeout(() => {
+          voiceWaitersRef.current.delete(command.requestId);
+          resolve({
+            ok: false,
+            status: "failed",
+            message: "The browser agent did not acknowledge the voice command.",
+          });
+        }, 5_000);
+        voiceWaitersRef.current.set(command.requestId, { resolve, timer });
+        socket.send(JSON.stringify(command));
+      }),
+    [],
+  );
+
+  const submitVoiceChoice = useCallback((requestId: string, optionId: string) => {
+    const socket = socketRef.current;
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ type: "choice", requestId, value: optionId }));
+    return true;
+  }, []);
+
+  const recordVoiceTranscript = useCallback(
+    (message: VoiceTranscriptMessage) => {
+      append({
+        kind: message.speaker === "assistant" ? "voice_assistant" : "voice_user",
+        text: message.text,
+        inputModality: message.inputModality,
+        outputModality: message.outputModality,
+      });
+      voiceTranscriptWriteRef.current = voiceTranscriptWriteRef.current
+        .catch(() => {
+          // A failed message must not block later transcript writes.
+        })
+        .then(async () => {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+              await saveVoiceTranscript(String(id), message);
+              return;
+            } catch {
+              await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** attempt));
+            }
+          }
+          console.error("[live_voice] transcript.save_failed", message.messageId);
+        });
+    },
+    [append, id],
+  );
+
+  const logVoiceTelemetry = useCallback(
+    (event: string, detail?: string, level: "info" | "warn" | "error" = "info") => {
+      void postVoiceTelemetry(String(id), event, detail, level).catch(() => {});
+    },
+    [id],
+  );
+
+  const resume = async () => {
+    if (continuationId) {
+      router.replace(`/session/${continuationId}`);
+      return;
+    }
+
+    setResuming(true);
+    setError(null);
+    try {
+      const next = await resumeSession(String(id));
+      router.replace(`/session/${next.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+      setResuming(false);
+    }
   };
 
   const pending = items.find((i) => i.kind === "approval" && !i.resolved) as
@@ -368,6 +546,25 @@ export default function SessionScreen() {
 
           {!ended ? (
             <View style={[styles.composer, { paddingBottom: Math.max(space.md, insets.bottom) }]}>
+              <MobileLiveVoice
+                ref={liveVoiceRef}
+                sessionId={String(id)}
+                runtimeConnected={connected}
+                runtimeStatus={status}
+                startBrowserTask={(requestId, instruction) =>
+                  sendVoiceCommand({
+                    type: "voice_task_start",
+                    requestId,
+                    text: instruction,
+                  })
+                }
+                interruptBrowserTask={(requestId) =>
+                  sendVoiceCommand({ type: "agent_interrupt", requestId })
+                }
+                submitChoice={submitVoiceChoice}
+                recordTranscript={recordVoiceTranscript}
+                logTelemetry={logVoiceTelemetry}
+              />
               <TextInput
                 value={draft}
                 onChangeText={setDraft}
@@ -387,8 +584,19 @@ export default function SessionScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={[styles.composer, { paddingBottom: Math.max(space.md, insets.bottom) }]}>
+            <View
+              style={[
+                styles.endedComposer,
+                { paddingBottom: Math.max(space.md, insets.bottom) },
+              ]}
+            >
               <Text style={type.small}>This session has ended.</Text>
+              <Button
+                label={continuationId ? "Open continuation" : "Resume session"}
+                busy={resuming}
+                onPress={() => void resume()}
+                style={{ alignSelf: "stretch" }}
+              />
             </View>
           )}
         </View>
@@ -416,6 +624,28 @@ function Line({
   if (item.kind === "agent") {
     return <AgentMarkdown>{item.text}</AgentMarkdown>;
   }
+  if (item.kind === "voice_user") {
+    return (
+      <View style={{ alignItems: "flex-end" }}>
+        <Text style={[type.tiny, { color: colour.textFaint, marginBottom: 3 }]}>
+          Voice · {item.inputModality} → {item.outputModality}
+        </Text>
+        <View style={styles.youBubble}>
+          <Text style={[type.body, { color: colour.text }]}>{item.text}</Text>
+        </View>
+      </View>
+    );
+  }
+  if (item.kind === "voice_assistant") {
+    return (
+      <View style={styles.voiceAssistant}>
+        <Text style={[type.tiny, { color: colour.signal, marginBottom: space.xs }]}>
+          Gemini Live · {item.inputModality} → {item.outputModality}
+        </Text>
+        <AgentMarkdown>{item.text}</AgentMarkdown>
+      </View>
+    );
+  }
   if (item.kind === "tool") {
     return <Mono style={{ color: colour.textFaint }}>{item.text}</Mono>;
   }
@@ -424,6 +654,9 @@ function Line({
   }
   if (item.kind === "file") {
     return <Mono style={{ color: colour.signal }}>↓ {item.filename}</Mono>;
+  }
+  if (item.kind === "screenshot") {
+    return <Mono style={{ color: colour.textFaint }}>Screenshot · {item.filename}</Mono>;
   }
   if (item.kind === "choice") {
     return (
@@ -461,6 +694,13 @@ function Line({
 }
 
 const styles = StyleSheet.create({
+  voiceAssistant: {
+    borderWidth: 1,
+    borderColor: colour.borderStrong,
+    borderRadius: radius.sm,
+    backgroundColor: colour.card,
+    padding: space.sm,
+  },
   preview: {
     backgroundColor: "#000",
     borderBottomWidth: 1,
@@ -520,6 +760,12 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: "row",
     alignItems: "center",
+    gap: space.sm,
+    padding: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colour.border,
+  },
+  endedComposer: {
     gap: space.sm,
     padding: space.md,
     borderTopWidth: 1,

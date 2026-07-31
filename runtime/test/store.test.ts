@@ -176,6 +176,56 @@ describe("sessions", () => {
     await store.setStatus(id, "stopped");
   });
 
+  test("concurrent events receive unique contiguous sequence numbers", async () => {
+    const id = await store.createSession({ userId, siteProfileId: siteId });
+    await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        store.appendEvent(id, { type: "agent_text", text: `event ${i}` }),
+      ),
+    );
+
+    const events = await store.events(id);
+    expect(events.map((event) => event.seq)).toEqual(
+      Array.from({ length: 12 }, (_, i) => i + 1),
+    );
+    expect(new Set(events.map((event) => event.payload.type))).toEqual(new Set(["agent_text"]));
+    await store.setStatus(id, "stopped");
+  });
+
+  test("stores resume lineage and safe browser checkpoints", async () => {
+    const sourceId = await store.createSession({
+      userId,
+      siteProfileId: siteId,
+      title: "source",
+      model: "saved-model",
+    });
+    await store.checkpointSession(sourceId, {
+      lastUrl: "https://target.test/orders/42",
+      lastUserMessage: "Finish order 42",
+    });
+    await store.setStatus(sourceId, "stopped");
+
+    const resumedId = await store.createSession({
+      userId,
+      siteProfileId: siteId,
+      title: "source",
+      model: "saved-model",
+      resumedFromSessionId: sourceId,
+      lastUrl: "https://target.test/orders/42",
+      lastUserMessage: "Finish order 42",
+    });
+
+    expect(await store.continuationFor(sourceId)).toBe(resumedId);
+    expect(await store.resumableSession(sourceId)).toMatchObject({
+      id: sourceId,
+      status: "stopped",
+      model: "saved-model",
+      lastUrl: "https://target.test/orders/42",
+      lastUserMessage: "Finish order 42",
+    });
+    await store.setStatus(resumedId, "stopped");
+  });
+
   test("orphaned sessions are marked interrupted at boot", async () => {
     const id = await store.createSession({ userId, siteProfileId: siteId });
     const changed = await store.markOrphansInterrupted();

@@ -16,11 +16,18 @@ export type ChoiceOption = {
   description?: string;
 };
 
-export type RobotEvent =
+export type RobotEvent = (
   | { type: "session_status"; status: SessionStatus; detail?: string }
   /** What the user said. Stored so a reloaded page shows both sides. */
   | { type: "user_msg"; text: string }
   | { type: "agent_text"; text: string }
+  /** Incremental text for live narration. Not stored in the durable transcript. */
+  | { type: "agent_text_delta"; text: string }
+  | {
+      type: "agent_turn_complete";
+      outcome: "completed" | "interrupted" | "failed";
+      detail?: string;
+    }
   | { type: "tool_activity"; tool: string; summary: string }
   | { type: "approval_request"; requestId: string; tool: string; summary: string }
   | { type: "approval_resolved"; requestId: string; approved: boolean }
@@ -41,7 +48,19 @@ export type RobotEvent =
   | { type: "screenshot"; filename: string; url: string }
   /** Whether frames are flowing, so a reconnecting client's toggle tells the truth. */
   | { type: "preview_state"; enabled: boolean }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      type: "voice_command_result";
+      requestId: string;
+      action: "start" | "interrupt";
+      ok: boolean;
+      status: "accepted" | "busy" | "idle" | "invalid" | "failed";
+      message: string;
+    }
+) & {
+  /** Correlates runtime progress with the Gemini function call that started it. */
+  voiceTaskId?: string;
+};
 
 /**
  * Where a client fetches a file this session produced.
@@ -55,6 +74,8 @@ export function sessionFileUrl(sessionId: string, filename: string): string {
 
 export type ClientCommand =
   | { type: "user_msg"; text: string }
+  | { type: "voice_task_start"; requestId: string; text: string }
+  | { type: "agent_interrupt"; requestId: string; replacementText?: string }
   | { type: "approval"; requestId: string; approved: boolean }
   | { type: "choice"; requestId: string; value: string }
   | { type: "preview"; enabled: boolean }

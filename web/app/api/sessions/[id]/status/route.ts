@@ -20,6 +20,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       userId: robotSessions.userId,
       status: robotSessions.status,
       endedReason: robotSessions.endedReason,
+      resumedFromSessionId: robotSessions.resumedFromSessionId,
     })
     .from(robotSessions)
     .where(eq(robotSessions.id, id))
@@ -30,5 +31,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Not your session" }, { status: 403 });
   }
 
-  return NextResponse.json({ status: session.status, endedReason: session.endedReason });
+  const [continuation] = await db()
+    .select({ id: robotSessions.id })
+    .from(robotSessions)
+    .where(eq(robotSessions.resumedFromSessionId, id))
+    .limit(1);
+
+  return NextResponse.json({
+    status: session.status,
+    endedReason: session.endedReason,
+    resumedFromSessionId: session.resumedFromSessionId,
+    continuationId: continuation?.id ?? null,
+  });
 }

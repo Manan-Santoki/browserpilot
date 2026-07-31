@@ -11,6 +11,7 @@ import { stopSession } from "./sessions/actions";
 import { ConfirmAction } from "@/components/confirm-action";
 import { SessionThumbnail } from "@/components/session-thumbnail";
 import { listRuntimeSessions } from "@/lib/runtime";
+import { availableModels } from "@/lib/models";
 
 const LIVE = ["starting", "idle", "working", "awaiting_approval"] as const;
 
@@ -106,7 +107,7 @@ export default async function SessionsPage() {
           </p>
         </div>
 
-        <StartSessionForm sites={startable} />
+        <StartSessionForm sites={startable} models={availableModels()} />
       </div>
 
       {connectedLive.length > 0 ? (

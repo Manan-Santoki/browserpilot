@@ -60,6 +60,11 @@ export type Account = {
 };
 
 export async function consoleUrl(): Promise<string> {
+  // A development build must be able to target its configured console even
+  // when SecureStore still contains the URL from an earlier production
+  // pairing. Release builds normally have no override and continue using the
+  // paired URL.
+  if (process.env.EXPO_PUBLIC_CONSOLE_URL) return DEFAULT_CONSOLE_URL;
   return (await store.get(CONSOLE_URL_KEY)) ?? DEFAULT_CONSOLE_URL;
 }
 
@@ -209,5 +214,54 @@ export const startSession = (siteProfileId: string, title?: string) =>
 export const stopSession = (id: string) =>
   api<{ ok: boolean }>(`/api/sessions/${id}/stop`, { method: "POST" });
 
+export const resumeSession = (id: string) =>
+  api<{ id: string; resumedFromSessionId: string }>(`/api/sessions/${id}/resume`, {
+    method: "POST",
+  });
+
+export const getSessionStatus = (id: string) =>
+  api<{
+    status: string;
+    endedReason: string | null;
+    resumedFromSessionId: string | null;
+    continuationId: string | null;
+  }>(`/api/sessions/${id}/status`);
+
 export const getTicket = (id: string) =>
   api<{ url: string }>(`/api/sessions/${id}/ticket`, { method: "POST" });
+
+export const getLiveToken = (id: string) =>
+  api<{
+    token: string;
+    model: string;
+    setup: Record<string, unknown>;
+    expiresAt: string;
+  }>(`/api/sessions/${id}/live-token`, { method: "POST" });
+
+export type VoiceTranscriptMessage = {
+  messageId: string;
+  speaker: "user" | "assistant";
+  text: string;
+  inputModality: "text" | "audio";
+  outputModality: "text" | "audio";
+};
+
+export const getTranscript = <T>(id: string) =>
+  api<{ items: T[] }>(`/api/sessions/${id}/transcript`);
+
+export const saveVoiceTranscript = (id: string, message: VoiceTranscriptMessage) =>
+  api<{ saved: boolean }>(`/api/sessions/${id}/transcript`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "transcript", ...message }),
+  });
+
+export const logVoiceTelemetry = (
+  id: string,
+  event: string,
+  detail?: string,
+  level: "info" | "warn" | "error" = "info",
+) =>
+  api<{ logged: boolean }>(`/api/sessions/${id}/transcript`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "telemetry", event, detail, level }),
+  });

@@ -129,6 +129,18 @@ export function stopRuntimeSession(user: CurrentUser, sessionId: string) {
   });
 }
 
+/** Start a linked continuation of an ended session. */
+export function resumeRuntimeSession(user: CurrentUser, sessionId: string) {
+  return call<{ id: string; resumedFromSessionId: string }>(
+    user,
+    `/api/sessions/${sessionId}/resume`,
+    {
+      method: "POST",
+      sessionId,
+    },
+  );
+}
+
 /** Public URL the browser should open its WebSocket against. */
 export function runtimeWsUrl(sessionId: string, ticket: string): string {
   const base = RUNTIME_URL.replace(/^http/, "ws");

@@ -6,15 +6,23 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { runtimeHttpUrl } from "@/lib/runtime";
 import { loadTranscript } from "@/lib/transcript";
-import { restartBrowser, stopSession } from "../actions";
+import { restartBrowser, resumeSession, stopSession } from "../actions";
 import { ConfirmAction } from "@/components/confirm-action";
+import { Button } from "@/components/ui/button";
 import { LiveSession } from "./live";
 import { SessionFiles } from "./files";
 import { TranscriptView } from "./transcript-view";
 
-export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SessionPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ resumeError?: string }>;
+}) {
   const user = await requireUser();
   const { id } = await params;
+  const { resumeError } = await searchParams;
 
   const [session] = await db()
     .select({
@@ -24,6 +32,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       title: robotSessions.title,
       startedAt: robotSessions.startedAt,
       endedReason: robotSessions.endedReason,
+      resumedFromSessionId: robotSessions.resumedFromSessionId,
       siteName: siteProfiles.name,
       siteUrl: siteProfiles.baseUrl,
     })
@@ -37,6 +46,11 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
   const finished = ["stopped", "failed", "interrupted"].includes(session.status);
   const transcript = await loadTranscript(session.id);
+  const [continuation] = await db()
+    .select({ id: robotSessions.id, status: robotSessions.status })
+    .from(robotSessions)
+    .where(eq(robotSessions.resumedFromSessionId, session.id))
+    .limit(1);
 
   return (
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
@@ -76,13 +90,38 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
               variant="outline"
               label="Stop session"
               title="Stop this session?"
-              description="The browser closes and the robot stops where it is. The conversation and any downloaded files stay available, but you cannot pick this session back up."
+              description="The browser closes where it is. The conversation and files stay available, and you can later continue in a fresh browser."
               confirmLabel="Stop it"
               destructive
             />
           </div>
-        ) : null}
+        ) : continuation ? (
+          <Link href={`/sessions/${continuation.id}`} className="text-sm font-medium underline">
+            Open continuation
+          </Link>
+        ) : (
+          <form action={resumeSession}>
+            <input type="hidden" name="sessionId" value={session.id} />
+            <Button type="submit">Resume session</Button>
+          </form>
+        )}
       </div>
+
+      {session.resumedFromSessionId ? (
+        <p className="text-muted-foreground text-sm">
+          Continued from{" "}
+          <Link className="text-foreground underline" href={`/sessions/${session.resumedFromSessionId}`}>
+            the previous session
+          </Link>
+          .
+        </p>
+      ) : null}
+
+      {resumeError ? (
+        <div className="border-destructive/50 text-destructive rounded-lg border px-4 py-3 text-sm">
+          {resumeError}
+        </div>
+      ) : null}
 
       {/* Downloads outlive the live view: still listed after a session ends. */}
       <SessionFiles sessionId={session.id} />
@@ -95,6 +134,9 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             </span>{" "}
             <span className="text-muted-foreground">
               Its browser is gone, but the conversation and files below are kept.
+              {continuation
+                ? " Work continues in the linked session."
+                : " Resume opens a fresh browser at the last safe page and hands off the recent context."}
             </span>
           </div>
           <TranscriptView items={transcript} />

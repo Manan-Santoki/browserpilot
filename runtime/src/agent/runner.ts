@@ -58,9 +58,11 @@ export type StartAgentDeps = {
 };
 
 export type AgentRunner = {
-  send(text: string): void;
+  send(text: string, voiceTaskId?: string): void;
   approve(requestId: string, approved: boolean): void;
   choose(requestId: string, value: string): void;
+  /** Stop the current model turn while keeping the Claude session reusable. */
+  interrupt(): Promise<void>;
   /** Block follow-up browser calls as soon as Chromium reports a download. */
   downloadDetected(filename: string): void;
   /** End the current turn once the browser has produced the requested file. */
@@ -108,17 +110,31 @@ function createInputStream() {
  * The SDK replaces the subprocess environment with whatever `env` holds rather
  * than merging it into `process.env`, so passing the credential alone would
  * strip `PATH` and `HOME` — and the MCP server's `node` would stop resolving.
- * Inherit the real environment, drop any ambient Anthropic credential so it
- * cannot outrank the configured one, then apply ours.
+ * Inherit the real environment, drop everything that could point the agent at
+ * a different provider, then apply ours.
+ *
+ * The base URL matters as much as the credential here. A developer with
+ * `ANTHROPIC_BASE_URL` exported for some other tool would otherwise silently
+ * redirect every session's model traffic to it, and the only symptom would be
+ * answers that look subtly wrong.
  */
-function subprocessEnv(credential: Record<string, string>): Record<string, string> {
+const PROVIDER_ENV_KEYS = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  // We pass the model as an SDK option; an inherited one would only ever be a
+  // second, contradictory source of truth.
+  "ANTHROPIC_MODEL",
+] as const;
+
+function subprocessEnv(provider: Record<string, string>): Record<string, string> {
   const inherited: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) inherited[key] = value;
   }
-  delete inherited.CLAUDE_CODE_OAUTH_TOKEN;
-  delete inherited.ANTHROPIC_API_KEY;
-  return { ...inherited, ...credential };
+  for (const key of PROVIDER_ENV_KEYS) delete inherited[key];
+  return { ...inherited, ...provider };
 }
 
 function shortToolName(name: string): string {
@@ -216,6 +232,13 @@ export async function startAgent(
   let nextChoiceId = 0;
   let completedDownload: string | undefined;
   let interruptedForDownload = false;
+  let interruptedByUser = false;
+  const pendingTurnIds: Array<string | undefined> = [];
+
+  const emit = (event: RobotEvent) => {
+    const voiceTaskId = pendingTurnIds[0];
+    opts.onEvent(voiceTaskId ? { ...event, voiceTaskId } : event);
+  };
 
   const browserPilot = createSdkMcpServer({
     name: "browserpilot",
@@ -263,7 +286,7 @@ export async function startAgent(
           }
 
           const requestId = `choice_${++nextChoiceId}`;
-          opts.onEvent({
+          emit({
             type: "choice_request",
             requestId,
             question,
@@ -280,7 +303,7 @@ export async function startAgent(
             };
           }
 
-          opts.onEvent({
+          emit({
             type: "choice_resolved",
             requestId,
             value: selected.value,
@@ -341,7 +364,7 @@ export async function startAgent(
     }
 
     const requestId = `apr_${++nextRequestId}`;
-    opts.onEvent({
+    emit({
       type: "approval_request",
       requestId,
       tool: shortToolName(toolName),
@@ -352,7 +375,7 @@ export async function startAgent(
       approvals.set(requestId, resolve);
     });
     approvals.delete(requestId);
-    opts.onEvent({ type: "approval_resolved", requestId, approved });
+    emit({ type: "approval_resolved", requestId, approved });
 
     return approved
       ? { behavior: "allow", updatedInput }
@@ -369,6 +392,9 @@ export async function startAgent(
     tools: [],
     strictMcpConfig: true,
     permissionMode: "default",
+    // Text deltas let the live voice layer prepare low-latency narration. The
+    // durable transcript still records only complete assistant messages.
+    includePartialMessages: true,
     mcpServers: {
       playwright: {
         type: "stdio",
@@ -405,14 +431,14 @@ export async function startAgent(
     try {
       await opts.saveFile(filename, Buffer.from(source.data, "base64"));
     } catch (error) {
-      opts.onEvent({
+      emit({
         type: "error",
         message: `Could not save a screenshot: ${(error as Error).message}`,
       });
       return;
     }
 
-    opts.onEvent({
+    emit({
       type: "screenshot",
       filename,
       url: sessionFileUrl(opts.sessionId, filename),
@@ -423,13 +449,32 @@ export async function startAgent(
   void (async () => {
     try {
       for await (const message of session as AsyncIterable<unknown>) {
-        const msg = message as { type: string; message?: unknown };
+        const msg = message as {
+          type: string;
+          subtype?: string;
+          message?: unknown;
+          event?: {
+            type?: string;
+            delta?: { type?: string; text?: string };
+          };
+          errors?: string[];
+        };
+
+        if (
+          msg.type === "stream_event" &&
+          msg.event?.type === "content_block_delta" &&
+          msg.event.delta?.type === "text_delta" &&
+          typeof msg.event.delta.text === "string"
+        ) {
+          emit({ type: "agent_text_delta", text: msg.event.delta.text });
+          continue;
+        }
 
         if (msg.type === "assistant") {
           for (const raw of blocksOf(msg.message)) {
             const block = raw as Record<string, unknown>;
             if (block.type === "text" && typeof block.text === "string") {
-              opts.onEvent({ type: "agent_text", text: block.text });
+              emit({ type: "agent_text", text: block.text });
             } else if (block.type === "tool_use" && typeof block.name === "string") {
               const toolInput = (block.input ?? {}) as Record<string, unknown>;
               const short = shortToolName(block.name);
@@ -445,13 +490,34 @@ export async function startAgent(
               ) {
                 continue;
               }
-              opts.onEvent({
+              emit({
                 type: "tool_activity",
                 tool: short,
                 summary: summarize(block.name, toolInput),
               });
             }
           }
+          continue;
+        }
+
+        if (msg.type === "result") {
+          const voiceTaskId = pendingTurnIds.shift();
+          const outcome =
+            interruptedForDownload || msg.subtype === "success"
+              ? "completed"
+              : interruptedByUser
+                ? "interrupted"
+                : "failed";
+          const detail =
+            outcome === "failed" && Array.isArray(msg.errors) ? msg.errors.join("; ") : undefined;
+          opts.onEvent({
+            type: "agent_turn_complete",
+            outcome,
+            ...(detail ? { detail } : {}),
+            ...(voiceTaskId ? { voiceTaskId } : {}),
+          });
+          interruptedForDownload = false;
+          interruptedByUser = false;
           continue;
         }
 
@@ -468,14 +534,15 @@ export async function startAgent(
         }
       }
     } catch (error) {
-      opts.onEvent({ type: "error", message: (error as Error).message });
+      emit({ type: "error", message: (error as Error).message });
     }
   })();
 
   return {
-    send(text: string) {
+    send(text: string, voiceTaskId?: string) {
       completedDownload = undefined;
       interruptedForDownload = false;
+      pendingTurnIds.push(voiceTaskId);
       input.push(text);
     },
     approve(requestId: string, approved: boolean) {
@@ -487,6 +554,14 @@ export async function startAgent(
       if (!pending || !selected) return;
       choices.delete(requestId);
       pending.resolve(selected);
+    },
+    async interrupt() {
+      interruptedByUser = true;
+      approvals.forEach((resolve) => resolve(false));
+      approvals.clear();
+      choices.forEach(({ resolve }) => resolve(null));
+      choices.clear();
+      await session.interrupt();
     },
     downloadDetected(filename: string) {
       completedDownload ??= filename;

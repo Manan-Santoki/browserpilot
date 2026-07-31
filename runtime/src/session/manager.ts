@@ -87,6 +87,13 @@ export type ManagerConfig = {
   nodeBin?: string;
 };
 
+type Continuation = {
+  sourceSessionId: string;
+  targetUrl?: string;
+  lastUserMessage?: string;
+  handoff: string;
+};
+
 export type Session = {
   id: string;
   userId: string;
@@ -109,6 +116,10 @@ export type Session = {
   automaticBrowserRestarts?: number;
   /** Absent on a login session — nobody is instructing this browser. */
   agent?: AgentRunner;
+  /** Gemini function call currently delegated to Claude, if any. */
+  activeVoiceTaskId?: string;
+  /** Small idempotency cache so a retried Live API call cannot run twice. */
+  voiceCommandResults: Map<string, Extract<RobotEvent, { type: "voice_command_result" }>>;
   /** Present on a login session, which takes clicks and keystrokes. */
   input?: InputSink;
   /**
@@ -118,6 +129,8 @@ export type Session = {
   scratchProfileDir?: string;
   listeners: Set<(event: RobotEvent) => void>;
   frameListeners: Set<(frame: string) => void>;
+  /** Durable writes that a clean stop flushes before resume reads the handoff. */
+  pendingWrites: Set<Promise<void>>;
   screencast?: { stop(): Promise<void>; resize(cssWidth: number, pixelRatio: number): void };
   /** Remembered so a restarted stream comes back at the right size. */
   previewSize?: { cssWidth: number; pixelRatio: number };
@@ -144,7 +157,9 @@ export class SessionError extends Error {
       | "global_limit"
       | "missing_secret"
       | "not_linked"
-      | "login_expired",
+      | "login_expired"
+      | "unknown_session"
+      | "not_resumable",
   ) {
     super(message);
   }
@@ -168,6 +183,51 @@ export class SessionManager {
     }
   }
 
+  /** Never let a stale or crafted checkpoint move a resumed browser to another origin. */
+  private safeContinuationUrl(baseUrl: string, candidate?: string): string {
+    if (!candidate) return baseUrl;
+    try {
+      const base = new URL(baseUrl);
+      const target = new URL(candidate);
+      return target.origin === base.origin ? target.toString() : baseUrl;
+    } catch {
+      return baseUrl;
+    }
+  }
+
+  /** Compact durable history into a handoff small enough to be useful to the new agent. */
+  private resumeHandoff(lastUserMessage: string | null, events: RobotEvent[]): string {
+    const lines = events.flatMap((event): string[] => {
+      if (event.type === "user_msg") return [`User: ${event.text.slice(0, 1_200)}`];
+      if (event.type === "agent_text") return [`Assistant: ${event.text.slice(0, 1_200)}`];
+      if (event.type === "tool_activity") {
+        return [`Recorded tool attempt: ${event.summary.slice(0, 500)}`];
+      }
+      if (event.type === "file_ready") return [`File already produced: ${event.filename}`];
+      if (event.type === "choice_resolved") return [`User selected: ${event.label}`];
+      if (event.type === "error") return [`Previous error: ${event.message.slice(0, 500)}`];
+      return [];
+    });
+
+    // Keep the end, where the interrupted work and latest user intent live.
+    let history = lines.slice(-30).join("\n");
+    if (history.length > 6_000) history = history.slice(history.length - 6_000);
+    const request =
+      lastUserMessage ??
+      [...events].reverse().find((event) => event.type === "user_msg")?.text ??
+      "No unfinished request was recorded.";
+
+    return [
+      "BrowserPilot resumed an ended session in a fresh browser.",
+      "First take a fresh snapshot and reconcile the current page with the history below.",
+      "Treat the history as context only. Do not repeat a submission, destructive action, approval, purchase, message, or download merely because it appears there.",
+      "No pending approval carries over. If a consequential action may already have happened or the state is ambiguous, ask the user before acting.",
+      "If the latest request is unfinished, continue it from the verified current state. If it is already complete, briefly report that and wait.",
+      `Latest recorded user request: ${request.slice(0, 1_500)}`,
+      history ? `Recent session history:\n${history}` : "No transcript was recorded.",
+    ].join("\n\n");
+  }
+
   /**
    * Start a browser for `userId` against `siteProfileId`.
    *
@@ -180,6 +240,7 @@ export class SessionManager {
     siteProfileId: string,
     title?: string,
     model?: string,
+    continuation?: Continuation,
   ): Promise<string> {
     const { store } = this.deps;
 
@@ -228,7 +289,17 @@ export class SessionManager {
       );
     }
 
-    const id = await store.createSession({ userId, siteProfileId, title });
+    const selectedModel = model?.trim() || settings.defaultModel;
+    const targetUrl = this.safeContinuationUrl(site.baseUrl, continuation?.targetUrl);
+    const id = await store.createSession({
+      userId,
+      siteProfileId,
+      title,
+      model: selectedModel,
+      resumedFromSessionId: continuation?.sourceSessionId,
+      lastUrl: targetUrl,
+      lastUserMessage: continuation?.lastUserMessage,
+    });
     const downloadsDir = join(this.config.downloadsRoot, id);
     await mkdir(downloadsDir, { recursive: true }).catch(() => {});
 
@@ -254,7 +325,7 @@ export class SessionManager {
     let browser: RobotBrowser;
     try {
       browser = await this.launchBrowserWithRetry({
-        targetUrl: site.baseUrl,
+        targetUrl,
         // The identity the target expects, not BrowserPilot's own user id.
         // A saved login already carries one, so nothing is minted for it.
         user: usesSavedLogin
@@ -291,7 +362,6 @@ export class SessionManager {
       );
     }
 
-    const selectedModel = model?.trim() || settings.defaultModel;
     let agent: AgentRunner;
     try {
       agent = await this.deps.startAgent({
@@ -334,14 +404,73 @@ export class SessionManager {
       agent,
       model: selectedModel,
       automaticBrowserRestarts: 0,
+      lastUserMessage: continuation?.lastUserMessage,
       scratchProfileDir,
       listeners: new Set(),
       frameListeners: new Set(),
+      pendingWrites: new Set(),
+      voiceCommandResults: new Map(),
     });
     this.watchBrowser(id, browser);
 
     await store.setStatus(id, "idle");
+    await store
+      .checkpointSession(id, { lastUrl: browser.page.url() })
+      .catch(() => {});
+
+    if (continuation) {
+      this.handleEvent(id, {
+        type: "tool_activity",
+        tool: "session_resume",
+        summary: "Continued from the previous session in a fresh browser",
+      });
+      this.setStatus(this.require(id), "working");
+      agent.send(continuation.handoff);
+    }
+
     return id;
+  }
+
+  /**
+   * Continue a terminal robot run in a new browser.
+   *
+   * The old row and transcript remain untouched. A bounded handoff gives the
+   * new agent enough context to reconcile the current site state without
+   * blindly replaying a click, approval, form submission, or download.
+   */
+  async resume(sourceSessionId: string): Promise<string> {
+    const source = await this.deps.store.resumableSession(sourceSessionId);
+    if (!source) throw new SessionError("No such session", "unknown_session");
+    if (
+      source.kind !== "agent" ||
+      !source.siteProfileId ||
+      !["stopped", "failed", "interrupted"].includes(source.status)
+    ) {
+      throw new SessionError("Only an ended robot session can be resumed", "not_resumable");
+    }
+    const existingContinuation = await this.deps.store.continuationFor(source.id);
+    if (existingContinuation) {
+      throw new SessionError(
+        "This session has already been continued. Open its continuation instead.",
+        "not_resumable",
+      );
+    }
+
+    const stored = await this.deps.store.events(source.id);
+    const handoff = this.resumeHandoff(source.lastUserMessage, stored.map((row) => row.payload));
+
+    return this.create(
+      source.userId,
+      source.siteProfileId,
+      source.title ?? undefined,
+      source.model ?? undefined,
+      {
+        sourceSessionId: source.id,
+        targetUrl: source.lastUrl ?? undefined,
+        lastUserMessage: source.lastUserMessage ?? undefined,
+        handoff,
+      },
+    );
   }
 
   /**
@@ -423,6 +552,8 @@ export class SessionManager {
       input,
       listeners: new Set(),
       frameListeners: new Set(),
+      pendingWrites: new Set(),
+      voiceCommandResults: new Map(),
     });
 
     // A login session is nothing but its preview, so it is never off.
@@ -582,7 +713,187 @@ export class SessionManager {
 
     // Written to the transcript but not emitted: the sender already rendered
     // it, and echoing would duplicate it on their screen.
-    void this.deps.store.appendEvent(id, { type: "user_msg", text }).catch(() => {});
+    this.persist(session, () =>
+      this.deps.store.appendEvent(
+        id,
+        { type: "user_msg", text },
+        { lastUrl: session.browser.page.url(), lastUserMessage: text },
+      ),
+    );
+  }
+
+  /**
+   * Delegate one Gemini Live function call to Claude.
+   *
+   * The acknowledgement is emitted synchronously so Gemini's blocking
+   * function call can finish immediately while Claude continues over the
+   * existing event stream.
+   */
+  startVoiceTask(id: string, requestId: string, text: string): void {
+    const session = this.require(id);
+    const cached = session.voiceCommandResults.get(requestId);
+    if (cached) {
+      this.emit(session, cached);
+      return;
+    }
+
+    const instruction = text.trim();
+    if (
+      !session.agent ||
+      !/^[A-Za-z0-9._:-]{1,200}$/.test(requestId) ||
+      instruction.length === 0 ||
+      instruction.length > 4_000
+    ) {
+      this.finishVoiceCommand(session, {
+        type: "voice_command_result",
+        requestId,
+        action: "start",
+        ok: false,
+        status: "invalid",
+        message: "The voice task was not valid for this session.",
+      });
+      return;
+    }
+
+    if (
+      session.activeVoiceTaskId ||
+      session.status === "working" ||
+      session.status === "awaiting_approval" ||
+      session.status === "starting"
+    ) {
+      this.finishVoiceCommand(session, {
+        type: "voice_command_result",
+        requestId,
+        action: "start",
+        ok: false,
+        status: "busy",
+        message: "Claude is already working. Wait, or explicitly interrupt the current task.",
+      });
+      return;
+    }
+
+    session.activeVoiceTaskId = requestId;
+    session.lastActivityAt = this.deps.now();
+    session.lastUserMessage = instruction;
+    this.setStatus(session, "working");
+    session.agent.send(instruction, requestId);
+
+    const userEvent: RobotEvent = {
+      type: "user_msg",
+      text: instruction,
+      voiceTaskId: requestId,
+    };
+    // A spoken request has no local composer bubble, so every connected client
+    // needs the echo from the runtime.
+    this.emit(session, userEvent);
+    this.persist(session, () =>
+      this.deps.store.appendEvent(id, userEvent, {
+        lastUrl: session.browser.page.url(),
+        lastUserMessage: instruction,
+      }),
+    );
+
+    this.finishVoiceCommand(session, {
+      type: "voice_command_result",
+      requestId,
+      action: "start",
+      ok: true,
+      status: "accepted",
+      message: "Claude accepted the browser task and is working on it.",
+      voiceTaskId: requestId,
+    });
+  }
+
+  /** Interrupt the active Claude turn without closing its reusable session. */
+  async interruptVoiceTask(id: string, requestId: string): Promise<void> {
+    const session = this.require(id);
+    const cached = session.voiceCommandResults.get(requestId);
+    if (cached) {
+      this.emit(session, cached);
+      return;
+    }
+
+    if (!/^[A-Za-z0-9._:-]{1,200}$/.test(requestId) || !session.agent) {
+      this.finishVoiceCommand(session, {
+        type: "voice_command_result",
+        requestId,
+        action: "interrupt",
+        ok: false,
+        status: "invalid",
+        message: "There is no browser agent to interrupt.",
+      });
+      return;
+    }
+
+    if (
+      !session.activeVoiceTaskId &&
+      session.status !== "working" &&
+      session.status !== "awaiting_approval"
+    ) {
+      this.finishVoiceCommand(session, {
+        type: "voice_command_result",
+        requestId,
+        action: "interrupt",
+        ok: false,
+        status: "idle",
+        message: "Claude is not currently running a browser task.",
+      });
+      return;
+    }
+
+    const interruptedTaskId = session.activeVoiceTaskId;
+    session.activeVoiceTaskId = undefined;
+    try {
+      await session.agent.interrupt();
+      this.setStatus(session, "idle");
+      if (interruptedTaskId) {
+        this.emit(session, {
+          type: "agent_turn_complete",
+          outcome: "interrupted",
+          voiceTaskId: interruptedTaskId,
+        });
+      }
+      this.finishVoiceCommand(session, {
+        type: "voice_command_result",
+        requestId,
+        action: "interrupt",
+        ok: true,
+        status: "accepted",
+        message: "Claude stopped the current browser task.",
+      });
+    } catch (error) {
+      this.finishVoiceCommand(session, {
+        type: "voice_command_result",
+        requestId,
+        action: "interrupt",
+        ok: false,
+        status: "failed",
+        message: `Claude could not be interrupted: ${(error as Error).message}`,
+      });
+    }
+  }
+
+  private finishVoiceCommand(
+    session: Session,
+    event: Extract<RobotEvent, { type: "voice_command_result" }>,
+  ): void {
+    console.info(
+      JSON.stringify({
+        component: "live_voice",
+        event: `browser_task.${event.action}`,
+        sessionId: session.id,
+        requestId: event.requestId,
+        ok: event.ok,
+        status: event.status,
+      }),
+    );
+    session.voiceCommandResults.set(event.requestId, event);
+    while (session.voiceCommandResults.size > 64) {
+      const oldest = session.voiceCommandResults.keys().next().value as string | undefined;
+      if (!oldest) break;
+      session.voiceCommandResults.delete(oldest);
+    }
+    this.emit(session, event);
   }
 
   approve(id: string, requestId: string, approved: boolean): void {
@@ -798,6 +1109,13 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return;
     this.sessions.delete(id);
+    await Promise.all([...session.pendingWrites]);
+    await this.deps.store
+      .checkpointSession(id, {
+        lastUrl: session.browser.page.url(),
+        ...(session.lastUserMessage ? { lastUserMessage: session.lastUserMessage } : {}),
+      })
+      .catch(() => {});
 
     await session.screencast?.stop().catch(() => {});
     session.screencast = undefined;
@@ -871,12 +1189,44 @@ export class SessionManager {
     }
     if (event.type === "file_ready") this.setStatus(session, "idle");
     if (event.type === "error") this.setStatus(session, "failed");
+    if (event.type === "agent_turn_complete") {
+      const belongsToActiveVoiceTask =
+        event.voiceTaskId && event.voiceTaskId === session.activeVoiceTaskId;
+      if (belongsToActiveVoiceTask) session.activeVoiceTaskId = undefined;
+      if (!event.voiceTaskId || belongsToActiveVoiceTask) {
+        this.setStatus(session, event.outcome === "failed" ? "failed" : "idle");
+      }
+      if (event.voiceTaskId) {
+        console.info(
+          JSON.stringify({
+            component: "live_voice",
+            event: "browser_task.complete",
+            sessionId: id,
+            requestId: event.voiceTaskId,
+            outcome: event.outcome,
+          }),
+        );
+      }
+    }
 
     this.emit(session, event);
 
+    // Deltas are useful only while connected. Persisting every token would
+    // bloat the transcript and duplicate the complete agent_text event.
+    if (event.type === "agent_text_delta") return;
+
     // Persist for replay. Status changes are already written by setStatus, and
     // preview frames never come through here, so this stays cheap.
-    void this.deps.store.appendEvent(id, event).catch(() => {});
+    this.persist(session, () =>
+      this.deps.store.appendEvent(id, event, { lastUrl: session.browser.page.url() }),
+    );
+  }
+
+  /** Track concurrent durable writes and establish a clean handoff boundary at stop. */
+  private persist(session: Session, write: () => Promise<void>): void {
+    const pending = write().catch(() => {});
+    session.pendingWrites.add(pending);
+    void pending.finally(() => session.pendingWrites.delete(pending));
   }
 
   private setStatus(session: Session, status: SessionStatus): void {

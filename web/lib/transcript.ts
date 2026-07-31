@@ -6,6 +6,18 @@ import { db } from "./db";
 export type ChatItem =
   | { kind: "you"; text: string }
   | { kind: "agent"; text: string }
+  | {
+      kind: "voice_user";
+      text: string;
+      inputModality: "text" | "audio";
+      outputModality: "text" | "audio";
+    }
+  | {
+      kind: "voice_assistant";
+      text: string;
+      inputModality: "text" | "audio";
+      outputModality: "text" | "audio";
+    }
   | { kind: "tool"; text: string }
   | { kind: "error"; text: string }
   | { kind: "file"; filename: string; url: string }
@@ -34,6 +46,9 @@ type StoredEvent = {
   options?: Array<{ label?: string; value?: string; description?: string }>;
   value?: string;
   label?: string;
+  speaker?: string;
+  inputModality?: string;
+  outputModality?: string;
 };
 
 /**
@@ -65,6 +80,21 @@ export async function loadTranscript(sessionId: string): Promise<ChatItem[]> {
         break;
       case "agent_text":
         if (event.text) items.push({ kind: "agent", text: event.text });
+        break;
+      case "voice_transcript":
+        if (
+          event.text &&
+          ["user", "assistant"].includes(event.speaker ?? "") &&
+          ["text", "audio"].includes(event.inputModality ?? "") &&
+          ["text", "audio"].includes(event.outputModality ?? "")
+        ) {
+          items.push({
+            kind: event.speaker === "assistant" ? "voice_assistant" : "voice_user",
+            text: event.text,
+            inputModality: event.inputModality as "text" | "audio",
+            outputModality: event.outputModality as "text" | "audio",
+          });
+        }
         break;
       case "tool_activity":
         if (

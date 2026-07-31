@@ -11,19 +11,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { ModelChoice } from "@browserpilot/core";
 import { startSession, type StartState } from "./sessions/actions";
 
 const initial: StartState = {};
 
-const MODELS = [
-  { value: "default", label: "Default model" },
-  { value: "claude-opus-5", label: "Opus 5 · most capable" },
-  { value: "claude-sonnet-5", label: "Sonnet 5 · faster" },
-  { value: "claude-haiku-4-5", label: "Haiku 4.5 · fastest" },
-];
+/** Falls through to whatever an admin has saved as the default. */
+const USE_DEFAULT: ModelChoice = { value: "default", label: "Default model" };
 
-export function StartSessionForm({ sites }: { sites: Array<{ id: string; name: string }> }) {
+type Props = {
+  sites: Array<{ id: string; name: string }>;
+  /**
+   * What this deployment's provider serves, from the server. Hardcoding the
+   * Claude line-up here meant a deployment pointed at a gateway offered three
+   * models it would 404 on, with nothing on screen to say so.
+   */
+  models: ModelChoice[];
+};
+
+export function StartSessionForm({ sites, models }: Props) {
   const [state, action, pending] = useActionState(startSession, initial);
+
+  const modelItems = [USE_DEFAULT, ...models];
 
   if (sites.length === 0) {
     return (
@@ -53,18 +62,22 @@ export function StartSessionForm({ sites }: { sites: Array<{ id: string; name: s
         </SelectContent>
       </Select>
 
-      <Select name="model" defaultValue="default" items={MODELS}>
-        <SelectTrigger className="w-[170px]" aria-label="Model">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {MODELS.map((model) => (
-            <SelectItem key={model.value} value={model.value}>
-              {model.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {/* One entry means there is nothing to choose between — the admin's
+          default is the only option, so the picker is noise. */}
+      {modelItems.length > 1 ? (
+        <Select name="model" defaultValue="default" items={modelItems}>
+          <SelectTrigger className="w-[170px]" aria-label="Model">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {modelItems.map((model) => (
+              <SelectItem key={model.value} value={model.value}>
+                {model.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
 
       <Input name="title" placeholder="What is this for?" className="w-52" />
 

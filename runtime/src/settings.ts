@@ -32,8 +32,15 @@ const MINIMUMS = {
 
 export type SettingRow = { key: string; value: unknown };
 
-export function parseSettings(rows: SettingRow[]): RuntimeSettings {
+/**
+ * @param fallbackModel used when no `defaultModel` row has been written yet.
+ *   A deployment pointed at a gateway has no use for `claude-opus-5`, so the
+ *   built-in default has to be able to follow the configured provider rather
+ *   than naming a model that would 404 on the first session.
+ */
+export function parseSettings(rows: SettingRow[], fallbackModel?: string): RuntimeSettings {
   const result: RuntimeSettings = { ...DEFAULT_SETTINGS };
+  if (fallbackModel?.trim()) result.defaultModel = fallbackModel.trim();
 
   for (const row of rows) {
     if (!(row.key in DEFAULT_SETTINGS)) continue;

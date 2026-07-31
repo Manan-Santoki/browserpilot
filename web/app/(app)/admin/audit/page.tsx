@@ -17,6 +17,7 @@ const PHRASING: Record<string, string> = {
   "site.login_saved": "saved a sign-in for a site",
   "site.deleted": "removed a site",
   "session.started": "started a session",
+  "session.resumed": "resumed a session",
   "session.stopped": "stopped a session",
   "session.approval": "answered an approval",
   "device.paired": "paired a device",

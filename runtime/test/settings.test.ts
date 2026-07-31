@@ -56,4 +56,20 @@ describe("parseSettings", () => {
       "claude-sonnet-5",
     );
   });
+
+  test("an unset model follows the configured provider, not a Claude id", () => {
+    // A deployment pointed at a gateway has no use for claude-opus-5; starting
+    // out with it would 404 every session until an admin noticed.
+    expect(parseSettings([], "qwen3.7-plus").defaultModel).toBe("qwen3.7-plus");
+  });
+
+  test("a stored model still wins over the provider fallback", () => {
+    expect(
+      parseSettings([{ key: "defaultModel", value: "minimax-m3" }], "qwen3.7-plus").defaultModel,
+    ).toBe("minimax-m3");
+  });
+
+  test("a blank fallback leaves the built-in default alone", () => {
+    expect(parseSettings([], "  ").defaultModel).toBe(DEFAULT_SETTINGS.defaultModel);
+  });
 });

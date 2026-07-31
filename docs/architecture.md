@@ -91,6 +91,41 @@ The agent reads pages primarily through the **accessibility tree** (`browser_sna
 
 The runtime strips the `filename` argument from `browser_take_screenshot` before the call runs. Playwright MCP returns the picture inline only when no filename is given; with one it writes the file into its own output directory — which nothing on our side can reach — and hands back a path. The result was that a screenshot reached neither the person who asked for it nor the model that took it, leaving the agent to describe the page from an older snapshot. With the argument dropped, the image comes back, is saved beside the session's downloads, and is announced with `screenshot`.
 
+#### The model provider
+
+The agent talks to exactly one Messages API, resolved at boot in `src/config.ts` and handed to the SDK as subprocess environment. Anthropic is the default; `BP_ANTHROPIC_BASE_URL` routes the same agent through any Anthropic-compatible gateway — OpenCode Zen or Go, LiteLLM, a self-hosted proxy — with no change to the agent loop, the approval gate, the MCP wiring, or the screenshot path. Only the endpoint and the model ids move.
+
+| Variable | Meaning |
+|---|---|
+| `BP_ANTHROPIC_BASE_URL` | The base the SDK appends `/v1/messages` to. Absent means Anthropic. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Subscription token → `Authorization: Bearer` + Anthropic's OAuth beta header. |
+| `ANTHROPIC_API_KEY` | Key → `x-api-key`. What OpenCode Zen and Go want. |
+| `ANTHROPIC_AUTH_TOKEN` | Key → `Authorization: Bearer`, no beta header. |
+| `BP_MODELS` | `id` or `id=Label`, comma separated. Read by the runtime *and* the console. |
+| `BP_MODEL` | Default before an admin chooses one. Falls back to the head of `BP_MODELS`. |
+
+Four things are enforced rather than left to discover at runtime, because every one of them otherwise surfaces only as a session that starts a browser and then says nothing:
+
+1. **A subscription token is refused against a gateway.** It authenticates to Anthropic and nowhere else, so pairing the two fails on the first model call with someone else's opaque 401.
+2. **A gateway must declare `BP_MODELS`.** Offering the Claude line-up against a gateway reselling Qwen would 404 once per session with nothing on screen to explain it — so the config refuses to load instead.
+3. **The base URL is normalized.** Gateways document their endpoint including `/v1/messages`, which is the natural thing to paste and yields `/v1/messages/v1/messages`. The suffix is trimmed rather than made the operator's problem.
+4. **Ambient provider variables are stripped from the subprocess.** `subprocessEnv` deletes any inherited `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_MODEL` before applying the configured ones. A developer with a base URL exported for some other tool would otherwise silently redirect every session's model traffic, and the only symptom would be answers that look subtly wrong.
+
+**Which credential variable you set is which header the key is sent in**, and gateways disagree about which they want. OpenCode wants `x-api-key` — so `ANTHROPIC_API_KEY` — even though the key it issues starts `sk-` and reads like a bearer token; sent as `Authorization: Bearer` it answers `401 {"type":"AuthError","message":"Missing API key."}`, which names the symptom and not the cause. The preflight's 401 message therefore names the header it used and the variable to move the key to, because that is the entire fix and it is otherwise a guess.
+
+Both services read `BP_MODELS`, the same way both are given `BP_TICKET_SECRET`: it is one value describing one deployment, and a console offering models the runtime cannot run is a failed session with no explanation. The console's pickers render exactly this catalogue, and the admin default-model field is a select rather than a text box — the failure it replaces was a typo that only surfaced as a broken session.
+
+`BP_MODELS` must be **quoted** in `.env`: labels contain spaces, and `scripts/dev.sh` sources the file through bash, which otherwise tries to run the second word as a command.
+
+**Verification is a first-class step, not a guess.** `bun run check:provider` sends a one-token Messages request at the configured endpoint and reports back: reachable, credential rejected, no API here, or unknown model. It runs on every boot too, logged and non-fatal — a provider that is briefly unreachable should not stop a service whose sessions, files and console are all fine.
+
+```
+bun run check:provider              # the default model
+bun run check:provider --all        # every model in BP_MODELS
+```
+
+**On subscription tokens:** Anthropic does not permit third-party products to offer claude.ai login or resell subscription rate limits. BrowserPilot is multi-user, so `CLAUDE_CODE_OAUTH_TOKEN` is a single-operator convenience — an API key or a gateway is the answer for anything with other people's accounts on it.
+
 ### 3.3 The browser
 
 One headless Chromium per session, launched by Playwright with `--remote-debugging-port`. Three consumers attach to that one browser:

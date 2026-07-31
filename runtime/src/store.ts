@@ -47,6 +47,18 @@ export type SessionOwner = {
   role: string;
 };
 
+export type ResumableSession = {
+  id: string;
+  userId: string;
+  siteProfileId: string | null;
+  kind: "agent" | "login";
+  status: SessionStatus;
+  title: string | null;
+  model: string | null;
+  lastUrl: string | null;
+  lastUserMessage: string | null;
+};
+
 /**
  * How this person reaches the target site.
  *
@@ -70,6 +82,12 @@ export class Store {
   constructor(
     databaseUrl: string,
     private masterKey: string,
+    /**
+     * Model to fall back on before an admin has chosen one. Follows the
+     * configured provider, so a gateway deployment does not start out naming
+     * a Claude model the gateway has never heard of.
+     */
+    private fallbackModel?: string,
   ) {
     this.db = createDatabase(databaseUrl);
   }
@@ -78,7 +96,7 @@ export class Store {
     const rows = await this.db
       .select({ key: settingsTable.key, value: settingsTable.value })
       .from(settingsTable);
-    return parseSettings(rows);
+    return parseSettings(rows, this.fallbackModel);
   }
 
   /** Load a target and unseal its signing secret. Returns null if unknown or disabled. */
@@ -209,6 +227,10 @@ export class Store {
     siteProfileId: string;
     title?: string;
     kind?: "agent" | "login";
+    model?: string;
+    resumedFromSessionId?: string;
+    lastUrl?: string;
+    lastUserMessage?: string;
   }): Promise<string> {
     const [row] = await this.db
       .insert(robotSessions)
@@ -218,9 +240,61 @@ export class Store {
         status: "starting",
         title: input.title ?? null,
         kind: input.kind ?? "agent",
+        model: input.model ?? null,
+        resumedFromSessionId: input.resumedFromSessionId ?? null,
+        lastUrl: input.lastUrl ?? null,
+        lastUserMessage: input.lastUserMessage ?? null,
       })
       .returning({ id: robotSessions.id });
     return row!.id;
+  }
+
+  /** Load the durable fields needed to create a continuation after its browser is gone. */
+  async resumableSession(sessionId: string): Promise<ResumableSession | null> {
+    const [row] = await this.db
+      .select({
+        id: robotSessions.id,
+        userId: robotSessions.userId,
+        siteProfileId: robotSessions.siteProfileId,
+        kind: robotSessions.kind,
+        status: robotSessions.status,
+        title: robotSessions.title,
+        model: robotSessions.model,
+        lastUrl: robotSessions.lastUrl,
+        lastUserMessage: robotSessions.lastUserMessage,
+      })
+      .from(robotSessions)
+      .where(eq(robotSessions.id, sessionId))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** A source has at most one direct continuation, keeping resume history linear. */
+  async continuationFor(sessionId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: robotSessions.id })
+      .from(robotSessions)
+      .where(eq(robotSessions.resumedFromSessionId, sessionId))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  /** Save only the state that can be restored safely in a fresh browser. */
+  async checkpointSession(
+    sessionId: string,
+    checkpoint: { lastUrl?: string; lastUserMessage?: string },
+  ): Promise<void> {
+    if (checkpoint.lastUrl === undefined && checkpoint.lastUserMessage === undefined) return;
+    await this.db
+      .update(robotSessions)
+      .set({
+        ...(checkpoint.lastUrl !== undefined ? { lastUrl: checkpoint.lastUrl } : {}),
+        ...(checkpoint.lastUserMessage !== undefined
+          ? { lastUserMessage: checkpoint.lastUserMessage }
+          : {}),
+        lastActivityAt: new Date(),
+      })
+      .where(eq(robotSessions.id, sessionId));
   }
 
   /** Record whether this person currently holds a working login for a site. */
@@ -297,18 +371,32 @@ export class Store {
       .where(eq(robotSessions.id, sessionId));
   }
 
-  /**
-   * Append to the durable transcript. The sequence number is derived in SQL so
-   * concurrent writers cannot both claim the same slot — the unique index on
-   * (session, seq) would reject the second one.
-   */
-  async appendEvent(sessionId: string, event: RobotEvent): Promise<void> {
-    await this.db.insert(sessionEvents).values({
-      robotSessionId: sessionId,
-      seq: sql`(select coalesce(max(${sessionEvents.seq}), 0) + 1 from ${sessionEvents} where ${sessionEvents.robotSessionId} = ${sessionId})`,
-      type: event.type,
-      payload: event,
-    });
+  /** Append to the durable transcript with an atomic per-session sequence number. */
+  async appendEvent(
+    sessionId: string,
+    event: RobotEvent,
+    checkpoint: { lastUrl?: string; lastUserMessage?: string } = {},
+  ): Promise<void> {
+    // Updating the parent row is the lock: concurrent statements for one
+    // session queue inside Postgres, each receives the counter value after the
+    // previous update, and inserts with no unique-key race or extra round trip.
+    await this.db.execute(sql`
+      with next_event as (
+        update "robot_sessions"
+        set "event_seq" = "event_seq" + 1,
+            "last_activity_at" = now(),
+            "last_url" = coalesce(${checkpoint.lastUrl ?? null}, "last_url"),
+            "last_user_message" = coalesce(
+              ${checkpoint.lastUserMessage ?? null},
+              "last_user_message"
+            )
+        where "id" = ${sessionId}::uuid
+        returning "event_seq"
+      )
+      insert into "session_events" ("robot_session_id", "seq", "type", "payload")
+      select ${sessionId}::uuid, next_event."event_seq", ${event.type}, ${JSON.stringify(event)}::jsonb
+      from next_event
+    `);
   }
 
   async events(sessionId: string, afterSeq = 0): Promise<Array<{ seq: number; payload: RobotEvent }>> {

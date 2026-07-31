@@ -17,6 +17,7 @@ export type AuditAction =
   | "site.login_started"
   | "site.login_saved"
   | "session.started"
+  | "session.resumed"
   | "session.stopped"
   | "session.approval"
   | "device.paired"

@@ -1,16 +1,24 @@
 "use client";
 
 import { useActionState } from "react";
+import type { ModelChoice } from "@browserpilot/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { saveSettings, type AdminState } from "../actions";
 
 const initial: AdminState = {};
 
-
 export function SettingsForm({
   current,
+  models,
 }: {
   current: {
     perUserSessionLimit: number;
@@ -19,6 +27,8 @@ export function SettingsForm({
     hardCapMs: number;
     defaultModel: string;
   };
+  /** What this deployment's provider serves. */
+  models: ModelChoice[];
 }) {
   const [state, action, pending] = useActionState(saveSettings, initial);
 
@@ -64,16 +74,32 @@ export function SettingsForm({
       ))}
 
       <div className="space-y-2">
-        <Label htmlFor="defaultModel">
-          Model
-        </Label>
-        <Input
-          id="defaultModel"
-          name="defaultModel"
-          defaultValue={current.defaultModel}
-        />
+        <Label htmlFor="defaultModel">Model</Label>
+
+        {/* A picker rather than a text field: the failure mode this replaces
+            was a typo'd model id that only surfaced as a failed session. With
+            nothing configured, fall back to free text so an admin editing a
+            half-configured deployment is not locked out. */}
+        {models.length > 0 ? (
+          <Select name="defaultModel" defaultValue={current.defaultModel} items={models}>
+            <SelectTrigger id="defaultModel" className="w-full" aria-label="Model">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((model) => (
+                <SelectItem key={model.value} value={model.value}>
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input id="defaultModel" name="defaultModel" defaultValue={current.defaultModel} />
+        )}
+
         <p className="mt-1 text-xs text-muted-foreground">
           Applies to sessions started from now on; running sessions keep the model they began with.
+          The list comes from <code>BP_MODELS</code>, which must match what your provider serves.
         </p>
       </div>
 
