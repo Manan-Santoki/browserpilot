@@ -42,7 +42,8 @@ The tradeoff, stated plainly: driving a UI is slower and more token-hungry per t
 │                          │           └── screencast (CDP)    │
 │                          │                                   │
 │                          └── AgentRunner                     │
-│                                ├── Claude Agent SDK          │
+│                                ├── Claude Agent SDK, or      │
+│                                │   our own AI SDK loop       │
 │                                └── Playwright MCP (stdio) ───┘
 │                                        │ attaches over CDP
 └────────────────────────────────────────┼─────────────────────┘
@@ -71,7 +72,9 @@ One Bun process, deployed as its own Dokploy application, entirely separate from
 | `src/browser/screencast.ts` | Starts/stops the CDP screencast that feeds live preview frames. |
 | `src/agent/prompt.ts` | Builds the system prompt for a target site (operating rules + domain vocabulary + routes). |
 | `src/agent/policy.ts` | Classifies each proposed tool call as auto-run or approval-required. |
-| `src/agent/runner.ts` | Wraps the Claude Agent SDK: streaming input, MCP wiring, permission callback, SDK-message → `RobotEvent` mapping. |
+| `src/agent/runner.ts` | The `AgentRunner` contract, the Claude Agent SDK implementation of it, and the switch between engines. |
+| `src/agent/engine/` | The other implementation: our own loop on the Vercel AI SDK. `loop.ts` drives turns, `tools.ts` wraps the browser tools with policy and the image path, `messages.ts` gets a screenshot to a model whose API cannot carry one, `compaction.ts` keeps a long session inside the context window. |
+| `src/agent/tool-display.ts` | How a tool call is named, summarised for an approval card, and sanitised. Shared by both engines. |
 | `src/session/manager.ts` | The registry. Session lifecycle, concurrency caps, idle/hard timeouts, event fan-out, download handling. |
 | `src/session/events.ts` | The wire contract shared with every client. |
 | `src/http/routes.ts` | `Bun.serve` HTTP routes and the WebSocket protocol. |
@@ -80,16 +83,41 @@ One Bun process, deployed as its own Dokploy application, entirely separate from
 
 ### 3.2 The agent
 
-Claude Agent SDK running `query()` in streaming-input mode: one long-lived agent session per robot session, fed user messages as they arrive from the phone.
+One long-lived agent per robot session, fed user messages as they arrive from the phone. Everything above it sits on one interface — `AgentRunner` in `runtime/src/agent/runner.ts`: `send`, `approve`, `choose`, `interrupt`, `downloadDetected`, `downloadCompleted`, `stop`. The session manager, the browser fleet, the screencast, the console and the mobile app all speak only that, which is what makes the loop underneath replaceable.
 
-Two things are deliberately constrained:
+There are two implementations of it, chosen by `BP_AGENT_ENGINE`:
 
-- **`tools: []`** plus **`strictMcpConfig: true`**. The agent's *entire* capability surface is the Playwright MCP tool set. It cannot read the runtime's filesystem, cannot run shell commands, cannot reach the network except through the browser it was given. The empty `tools` array is load-bearing: omit it and the SDK hands the agent the full Claude Code toolset — Bash, Read, Write — on the runtime host.
-- **`canUseTool`** is the approval gate. Every proposed tool call passes through `classifyToolUse`; anything not on the read-and-interact allowlist — and any click whose target element name matches destructive wording (delete, remove, cancel, void, discard, archive, revoke, reset) — suspends the agent until the phone answers.
+| | `agent-sdk` (default) | `sdk` |
+|---|---|---|
+| Loop | Claude Agent SDK `query()`, streaming input | ours, on the Vercel AI SDK `streamText` |
+| Speaks | Anthropic Messages API | both Anthropic and OpenAI formats |
+| Reaches | Claude, MiniMax, Qwen | those **plus** Grok, MiMo, Kimi, DeepSeek, GLM, GPT |
+| Context management | the SDK's, invisible | ours, in `engine/compaction.ts` |
+
+Two things are deliberately constrained in both, by different mechanisms:
+
+- **The agent's *entire* capability surface is the Playwright MCP tool set**, plus one tool of our own that shows a selector. It cannot read the runtime's filesystem, cannot run shell commands, cannot reach the network except through the browser it was given. On `agent-sdk` this is `tools: []` plus `strictMcpConfig: true` — the empty array is load-bearing, because omitting it hands the agent the full Claude Code toolset, Bash and Read and Write, on the runtime host. On `sdk` it is simply that no other tool is ever put in the tool set.
+- **Every proposed tool call passes through `classifyToolUse`**; anything not on the read-and-interact allowlist — and any click whose target element name matches destructive wording (delete, remove, cancel, void, discard, archive, revoke, reset) — suspends the agent until the phone answers. `agent-sdk` does this in `canUseTool`; `sdk` awaits the same answer inside the tool's own `execute`. `policy.ts` is shared and identical, which is what keeps the two from drifting.
 
 The agent reads pages primarily through the **accessibility tree** (`browser_snapshot`), not screenshots. This is faster, an order of magnitude cheaper in tokens, and more reliable for form-filling than pixel-based vision. Screenshots are taken when the user asks to see something, or when structure alone is insufficient.
 
 The runtime strips the `filename` argument from `browser_take_screenshot` before the call runs. Playwright MCP returns the picture inline only when no filename is given; with one it writes the file into its own output directory — which nothing on our side can reach — and hands back a path. The result was that a screenshot reached neither the person who asked for it nor the model that took it, leaving the agent to describe the page from an older snapshot. With the argument dropped, the image comes back, is saved beside the session's downloads, and is announced with `screenshot`.
+
+#### The `sdk` engine, and why it exists
+
+Five of OpenCode's twenty-four models reach an Anthropic-compatible endpoint. The other nineteen — Grok 4.5, MiMo V2.5, Kimi K3, and the rest — are served over OpenAI's format, and every one of them calls tools correctly. They were unreachable purely because of the protocol our harness spoke.
+
+Bridging the two formats is nearly mechanical, with one exception that is not: **an image inside a `tool_result` has nowhere to live in an OpenAI `tool` message**. That message carries text and nothing else. A naive bridge therefore drops every screenshot, and the symptom is not an error — it is a model that confidently describes a page it never saw.
+
+The fix is to leave a note where the image would have gone and hoist the image itself into a `user` message immediately after the tool results (`engine/messages.ts`). Doing that requires owning message assembly, which the Agent SDK does internally — and that, not any dissatisfaction with the Agent SDK, is the entire reason this engine exists.
+
+Owning execution also makes three previously awkward things ordinary code. The screenshot `filename` strip becomes rewriting the arguments before dispatch rather than `canUseTool`'s `updatedInput`; the approval gate becomes an awaited promise inside `execute`, with `policy.ts` unchanged; and an image on its way past can be saved for the console and shaped for the model in the same place.
+
+What we take on in exchange is **context management** (`engine/compaction.ts`). A BrowserPilot transcript is lopsided — a few short sentences from a person, and a great many accessibility snapshots of tens of thousands of tokens each, none read twice. So compaction is not summarisation: it truncates the bulky evidence the agent has already acted on, keeps every word anyone said, and keeps the most recent tool results whole because those are what the current step is reasoning about. A trimmed result stays a tool result — removing it would orphan the assistant call above it, which providers reject outright.
+
+A third thing is per-model rather than per-provider and matters here: **`vision`**. A model that cannot read images is not sent one. `qwen3.7-plus` answers 400 to an image and the whole turn dies; told plainly that a screenshot was taken and shown to the person, it carries on from the accessibility tree — which is how it drives pages anyway. The picture still reaches the user either way.
+
+`bun run check:engine <model>` runs the whole thing for real: a real Chromium, a real Playwright MCP subprocess, and a real provider, asked to screenshot a page and describe it. The unit suite proves the image is *shaped* right for each format; only this proves a model at the other end can read it.
 
 #### The model provider
 
@@ -120,7 +148,9 @@ Four things are enforced rather than left to discover at runtime, because every 
 3. **The base URL is normalized.** Gateways document their endpoint including `/v1/messages`, which is the natural thing to paste and yields `/v1/messages/v1/messages`. The suffix is trimmed rather than made the operator's problem.
 4. **Ambient provider variables are stripped from the subprocess.** `subprocessEnv` deletes any inherited `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_MODEL` before applying the configured ones. A developer with a base URL exported for some other tool would otherwise silently redirect every session's model traffic, and the only symptom would be answers that look subtly wrong.
 
-**Which credential variable you set is which header the key is sent in**, and gateways disagree about which they want. OpenCode wants `x-api-key` — so `ANTHROPIC_API_KEY` — even though the key it issues starts `sk-` and reads like a bearer token; sent as `Authorization: Bearer` it answers `401 {"type":"AuthError","message":"Missing API key."}`, which names the symptom and not the cause. The preflight's 401 message therefore names the header it used and the variable to move the key to, because that is the entire fix and it is otherwise a guess.
+**Which header the key rides in depends on the wire format as well as the credential kind.** Against an Anthropic-format endpoint the choice is the operator's and gateways disagree: OpenCode wants `x-api-key` — so `ANTHROPIC_API_KEY` — even though the key it issues starts `sk-` and reads like a bearer token; sent as `Authorization: Bearer` it answers `401 {"type":"AuthError","message":"Missing API key."}`, which names the symptom and not the cause.
+
+Against an **OpenAI-format** endpoint there is no choice to offer: `x-api-key` is an Anthropic convention and no part of OpenAI's, so the bearer header is always used. The same OpenCode key at the same host is accepted one way on `/v1/chat/completions` and the exact opposite way on `/v1/messages` — a fact found by running the engine for real, not by reading either provider's documentation. `providerHeaders(credential, format)` is therefore keyed on both, and the preflight's 401 message says which header it used and, where there is one, which variable to move the key to.
 
 Both services resolve the catalogue the same way — stored rows first, `BP_MODELS` second — for the same reason both are given `BP_TICKET_SECRET`: it is one answer describing one deployment, and a console offering models the runtime cannot run is a failed session with no explanation. The console's pickers render exactly this catalogue, and the admin default-model field is a select rather than a text box — the failure it replaces was a typo that only surfaced as a broken session.
 

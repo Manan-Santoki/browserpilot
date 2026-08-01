@@ -90,6 +90,18 @@ describe("providerHeaders", () => {
       authorization: "Bearer sk-x",
     });
   });
+
+  test("an OpenAI-format endpoint always gets the bearer header", () => {
+    // Found the hard way against OpenCode: the same key at the same host is
+    // rejected as `x-api-key` on /v1/chat/completions and accepted as a bearer
+    // token, while its /v1/messages endpoint wants the exact opposite.
+    // `x-api-key` is an Anthropic convention and no part of OpenAI's.
+    for (const kind of ["apiKey", "authToken", "oauth"] as const) {
+      expect(providerHeaders({ kind, value: "sk-x" }, "openai")).toEqual({
+        authorization: "Bearer sk-x",
+      });
+    }
+  });
 });
 
 describe("checkProvider", () => {

@@ -4,11 +4,8 @@ import type { AgentRunner } from "../agent/runner";
 import type { RobotBrowser, SavedCookie } from "../browser/chromium";
 import type { InputSink, RemoteInput } from "../browser/input";
 import type { ScreencastOptions } from "../browser/screencast";
-import {
-  providerSubprocessEnv,
-  type ProviderSettings,
-} from "../agent/provider-settings";
-import { resolveModel } from "@browserpilot/core";
+import { agentProviderOptions, type ProviderSettings } from "../agent/provider-settings";
+import { resolveModel, type WireFormat } from "@browserpilot/core";
 import { contentTypeFor } from "@browserpilot/core";
 import { objectKey, type ObjectStore } from "../storage/object-store";
 import type { ProfileStore } from "../browser/profiles";
@@ -33,7 +30,15 @@ export type AgentArgs = {
   cdpEndpoint: string;
   site: TargetSite;
   model: string;
+  /**
+   * How to reach the provider, and what this particular model can accept.
+   * Produced by `agentProviderOptions` so the two engines cannot disagree.
+   */
   env: Record<string, string>;
+  format?: WireFormat;
+  vision?: boolean;
+  baseUrl?: string;
+  headers?: Record<string, string>;
   nodeBin?: string;
   /** Named in the URLs the agent's screenshots are served from. */
   sessionId: string;
@@ -399,7 +404,7 @@ export class SessionManager {
         // A per-session choice wins over the configured default; running
         // sessions keep whatever they started with.
         model: selectedModel,
-        env: providerSubprocessEnv(provider),
+        ...agentProviderOptions(provider, selectedModel),
         nodeBin: this.config.nodeBin,
         sessionId: id,
         saveFile: (filename, bytes) => this.storeBytes(id, downloadsDir, filename, bytes),
@@ -1086,14 +1091,15 @@ export class SessionManager {
       // because the old one had stopped answering.
       const provider = await this.deps.resolveProvider();
       if (!provider) throw new Error("No model provider is configured");
+      const recoveredModel = session.model ?? (await this.deps.store.settings()).defaultModel;
 
       let agent: AgentRunner;
       try {
         agent = await this.deps.startAgent({
           cdpEndpoint: browser.cdpEndpoint,
           site,
-          model: session.model ?? (await this.deps.store.settings()).defaultModel,
-          env: providerSubprocessEnv(provider),
+          model: recoveredModel,
+          ...agentProviderOptions(provider, recoveredModel),
           nodeBin: this.config.nodeBin,
           sessionId: id,
           saveFile: (filename, bytes) =>

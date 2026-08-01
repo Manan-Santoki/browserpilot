@@ -56,14 +56,25 @@ export function messagesEndpoint(target: ProviderTarget): string {
 }
 
 /**
- * The auth headers for one credential kind.
+ * The auth headers for one credential, at one endpoint.
  *
- * An API key rides `x-api-key`; both bearer kinds ride `Authorization`. The
- * subscription token additionally needs Anthropic's OAuth beta header, which
- * a gateway neither wants nor understands — so it is scoped to that kind
+ * The format matters as much as the credential kind, which is not obvious and
+ * cost a real debugging session to find: OpenCode's Anthropic endpoint answers
+ * 401 to `Authorization: Bearer` and 200 to `x-api-key`, and its OpenAI
+ * endpoint — same host, same key — answers the exact opposite. `x-api-key` is
+ * an Anthropic convention and simply is not part of OpenAI's, so an
+ * OpenAI-format endpoint always gets the bearer header.
+ *
+ * The subscription token additionally needs Anthropic's OAuth beta header,
+ * which a gateway neither wants nor understands — so it is scoped to that kind
  * rather than sent to everyone.
  */
-export function providerHeaders(credential: AiCredential): Record<string, string> {
+export function providerHeaders(
+  credential: AiCredential,
+  format: WireFormat = "anthropic",
+): Record<string, string> {
+  if (format === "openai") return { authorization: `Bearer ${credential.value}` };
+
   switch (credential.kind) {
     case "apiKey":
       return { "x-api-key": credential.value };
@@ -78,15 +89,26 @@ export function providerHeaders(credential: AiCredential): Record<string, string
 }
 
 /** Turn a non-2xx into something a person can act on. */
-function explain(status: number, body: string, credential: AiCredential): string {
+function explain(
+  status: number,
+  body: string,
+  credential: AiCredential,
+  format: WireFormat | undefined,
+): string {
   const detail = body.trim().slice(0, 300) || "(empty response)";
   switch (status) {
     case 401:
     case 403: {
-      // Which variable holds the key *is* which header it is sent in, and
-      // gateways disagree about which one they want — OpenCode wants
-      // `x-api-key` despite documenting a `sk-` key that looks like a bearer
-      // token. Naming both sides turns a bare 401 into a one-line fix.
+      // Which header the key rode in is the fix or the dead end, and it is not
+      // visible from a bare 401. Against an Anthropic-format endpoint the
+      // choice is the operator's — gateways disagree, and OpenCode wants
+      // `x-api-key` despite issuing an `sk-` key that reads like a bearer
+      // token. Against an OpenAI-format one there is no choice to offer:
+      // `x-api-key` is not part of that convention at all.
+      if (format === "openai") {
+        return `credential rejected — the key was sent as Authorization: Bearer, which is the only header this API uses. The key itself is wrong, or has no access to this model. ${detail}`;
+      }
+
       const sent = credential.kind === "apiKey" ? "x-api-key" : "Authorization: Bearer";
       const other =
         credential.kind === "apiKey"
@@ -95,7 +117,7 @@ function explain(status: number, body: string, credential: AiCredential): string
       return `credential rejected — the key was sent as ${sent}. If the key itself is right, this provider may want the other header: move it to ${other}. ${detail}`;
     }
     case 404:
-      return `no Messages API here — check BP_ANTHROPIC_BASE_URL, and that the model id exists on this provider. ${detail}`;
+      return `no API here — check the provider address (the Models page, or BP_ANTHROPIC_BASE_URL), and that the model id exists on this provider. ${detail}`;
     case 400:
       return `request rejected — usually an unknown model id. ${detail}`;
     default:
@@ -120,7 +142,7 @@ export async function checkProvider(
         "content-type": "application/json",
         // Harmless to an OpenAI-format endpoint, and required by Anthropic's.
         "anthropic-version": "2023-06-01",
-        ...providerHeaders(target.credential),
+        ...providerHeaders(target.credential, target.format),
       },
       // The smallest request that still exercises auth, routing and the model
       // id. It stops at the first token, so it costs approximately nothing.
@@ -148,7 +170,7 @@ export async function checkProvider(
         endpoint,
         model,
         status: response.status,
-        detail: explain(response.status, body, target.credential),
+        detail: explain(response.status, body, target.credential, target.format),
       };
     }
 

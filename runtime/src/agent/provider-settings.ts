@@ -6,6 +6,7 @@ import {
   type ModelChoice,
   type WireFormat,
 } from "@browserpilot/core";
+import { providerHeaders } from "./preflight";
 
 // Re-exported: the runtime's own callers and tests reach for it here, next to
 // the settings it validates.
@@ -185,6 +186,38 @@ export function describeProviderSettings(settings: ProviderSettings | null): {
     endpoint: settings.baseUrl ?? "https://api.anthropic.com",
     credentialKind: settings.credential.kind,
     models: settings.models,
+  };
+}
+
+/**
+ * Everything one session's agent needs to know about its provider.
+ *
+ * Both engines are fed from here, so a model's format and its vision flag
+ * cannot drift apart from the credential they are used with. `env` serves the
+ * Agent SDK, which configures a subprocess; `headers` and `baseUrl` serve the
+ * AI SDK, which builds its own client in-process.
+ */
+export function agentProviderOptions(
+  settings: ProviderSettings,
+  model: string,
+): {
+  format: WireFormat;
+  vision: boolean;
+  baseUrl?: string;
+  headers: Record<string, string>;
+  env: Record<string, string>;
+} {
+  const choice = settings.models.find((m) => m.value === model);
+  const format = formatForModel(settings, model);
+  return {
+    format,
+    // A model we have never catalogued is assumed sighted: the failure that
+    // causes is one 400 on a screenshot, where assuming blind would silently
+    // withhold every image from a model that could have read them.
+    vision: choice?.vision ?? true,
+    baseUrl: settings.baseUrl,
+    headers: providerHeaders(settings.credential, format),
+    env: providerSubprocessEnv(settings),
   };
 }
 
