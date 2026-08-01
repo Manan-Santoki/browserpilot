@@ -39,13 +39,36 @@ function stubProvider(reply: () => Response | Promise<never>) {
 const ok = () => new Response(JSON.stringify({ id: "msg_1" }), { status: 200 });
 const status = (code: number, body = "") => () => new Response(body, { status: code });
 
+describe("an OpenAI-format provider", () => {
+  const target = {
+    baseUrl: "https://opencode.ai/zen/go",
+    credential: { kind: "apiKey" as const, value: "sk-x" },
+    format: "openai" as const,
+  };
+
+  test("is asked at the chat-completions endpoint", () => {
+    expect(messagesEndpoint(target)).toBe("https://opencode.ai/zen/go/v1/chat/completions");
+  });
+
+  test("is sent the token field its API accepts", async () => {
+    // `max_tokens` is rejected outright by newer OpenAI-format endpoints, so a
+    // probe that sent it would report every such provider as broken.
+    const { fetchFn, calls } = stubProvider(ok);
+    await checkProvider(target, "mimo-v2.5", { fetchFn });
+
+    const body = calls[0]!.body as Record<string, unknown>;
+    expect(body.max_completion_tokens).toBe(1);
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+});
+
 describe("messagesEndpoint", () => {
   test("defaults to Anthropic", () => {
-    expect(messagesEndpoint(loadConfig(base))).toBe("https://api.anthropic.com/v1/messages");
+    expect(messagesEndpoint(loadConfig(base).provider)).toBe("https://api.anthropic.com/v1/messages");
   });
 
   test("appends the path the SDK would append", () => {
-    expect(messagesEndpoint(loadConfig(gateway))).toBe("https://opencode.ai/zen/go/v1/messages");
+    expect(messagesEndpoint(loadConfig(gateway).provider)).toBe("https://opencode.ai/zen/go/v1/messages");
   });
 });
 
@@ -72,7 +95,7 @@ describe("providerHeaders", () => {
 describe("checkProvider", () => {
   test("sends the smallest request that still exercises auth and routing", async () => {
     const { fetchFn, calls } = stubProvider(ok);
-    const check = await checkProvider(loadConfig(gateway), "qwen3.7-plus", { fetchFn });
+    const check = await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
 
     expect(check.ok).toBe(true);
     expect(calls[0]!.url).toBe("https://opencode.ai/zen/go/v1/messages");
@@ -83,7 +106,7 @@ describe("checkProvider", () => {
 
   test("checks the configured default model when none is named", async () => {
     const { fetchFn, calls } = stubProvider(ok);
-    await checkProvider(loadConfig(gateway), undefined, { fetchFn });
+    await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
     expect(calls[0]!.body).toMatchObject({ model: "qwen3.7-plus" });
   });
 
@@ -92,7 +115,7 @@ describe("checkProvider", () => {
     // no hint. OpenCode wants x-api-key despite issuing an `sk-` key that
     // reads like a bearer token — this is the one-line fix for that.
     const { fetchFn } = stubProvider(status(401, "no"));
-    const bearer = await checkProvider(loadConfig(gateway), undefined, { fetchFn });
+    const bearer = await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
 
     if (bearer.ok) throw new Error("expected a failure");
     expect(bearer.status).toBe(401);
@@ -103,8 +126,8 @@ describe("checkProvider", () => {
     // ...and the mirror image, so neither direction is a dead end.
     const { ANTHROPIC_AUTH_TOKEN: _drop, ...asApiKey } = gateway;
     const keyed = await checkProvider(
-      loadConfig({ ...asApiKey, ANTHROPIC_API_KEY: "sk-x" }),
-      undefined,
+      loadConfig({ ...asApiKey, ANTHROPIC_API_KEY: "sk-x" }).provider,
+      "qwen3.7-plus",
       { fetchFn },
     );
 
@@ -115,7 +138,7 @@ describe("checkProvider", () => {
 
   test("a 404 points at the base URL and the model id", async () => {
     const { fetchFn } = stubProvider(status(404, "nope"));
-    const check = await checkProvider(loadConfig(gateway), undefined, { fetchFn });
+    const check = await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
 
     if (check.ok) throw new Error("expected a failure");
     expect(check.detail).toMatch(/BP_ANTHROPIC_BASE_URL/);
@@ -123,7 +146,7 @@ describe("checkProvider", () => {
 
   test("a 400 is read as an unknown model", async () => {
     const { fetchFn } = stubProvider(status(400, JSON.stringify({ error: { message: "model: unknown" } })));
-    const check = await checkProvider(loadConfig(gateway), "not-a-model", { fetchFn });
+    const check = await checkProvider(loadConfig(gateway).provider, "not-a-model", { fetchFn });
 
     if (check.ok) throw new Error("expected a failure");
     expect(check.detail).toMatch(/unknown model id/i);
@@ -134,7 +157,7 @@ describe("checkProvider", () => {
     // Failing here would gate a deploy on a busy account rather than a broken
     // one: a quota error proves both the route and the credential.
     const { fetchFn } = stubProvider(status(429, "slow down"));
-    const check = await checkProvider(loadConfig(gateway), undefined, { fetchFn });
+    const check = await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
 
     if (!check.ok) throw new Error("a rate limit is not a misconfiguration");
     expect(check.rateLimited).toBe(true);
@@ -145,7 +168,7 @@ describe("checkProvider", () => {
   test("an unreachable provider is a failure, not a thrown error", async () => {
     // Boot must survive it — the rest of the service is fine.
     const { fetchFn } = stubProvider(() => Promise.reject(new Error("ECONNREFUSED")));
-    const check = await checkProvider(loadConfig(gateway), undefined, { fetchFn });
+    const check = await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
 
     if (check.ok) throw new Error("expected a failure");
     expect(check.status).toBeUndefined();
@@ -154,7 +177,7 @@ describe("checkProvider", () => {
 
   test("a long error body is truncated rather than flooding the log", async () => {
     const { fetchFn } = stubProvider(status(500, "x".repeat(5000)));
-    const check = await checkProvider(loadConfig(gateway), undefined, { fetchFn });
+    const check = await checkProvider(loadConfig(gateway).provider, "qwen3.7-plus", { fetchFn });
 
     if (check.ok) throw new Error("expected a failure");
     expect(check.detail.length).toBeLessThan(400);
@@ -187,7 +210,7 @@ describe("formatCheck", () => {
 
   test("never prints the credential", () => {
     const config: RuntimeConfig = loadConfig(gateway);
-    expect(formatCheck({ ok: true, endpoint: messagesEndpoint(config), model: "m", latencyMs: 1 }))
+    expect(formatCheck({ ok: true, endpoint: messagesEndpoint(config.provider), model: "m", latencyMs: 1 }))
       .not.toContain("sk-gateway");
   });
 });

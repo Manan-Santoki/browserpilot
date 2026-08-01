@@ -24,12 +24,12 @@ const models = all
     : [config.defaultModel];
 
 console.log(`provider  ${describeProvider(config)}`);
-console.log(`endpoint  ${messagesEndpoint(config)}`);
+console.log(`endpoint  ${messagesEndpoint(config.provider)}`);
 console.log("");
 
 let failed = 0;
 for (const model of models) {
-  const check = await checkProvider(config, model);
+  const check = await checkProvider(config.provider, model);
   if (!check.ok) failed++;
   console.log(`${check.ok ? "✓" : "✗"} ${formatCheck(check)}`);
 }

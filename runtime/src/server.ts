@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
-import { describeProvider, loadConfig, providerEnv } from "./config";
+import { describeProvider, loadConfig } from "./config";
+import { providerEnvVars } from "./agent/provider-settings";
 import { launchRobotBrowser } from "./browser/chromium";
 import { createInputSink } from "./browser/input";
 import { createProfileStore } from "./browser/profiles";
@@ -54,11 +55,15 @@ const manager = new SessionManager(
   {
     downloadsRoot: config.downloadsRoot,
     scratchRoot: config.scratchRoot,
-    env: providerEnv(config),
     nodeBin: config.nodeBin,
   },
   {
     store,
+    // Read per session rather than at boot, so an administrator switching
+    // provider in the console takes effect on the next session rather than
+    // the next redeploy. Unlike `objects()` there is nothing expensive to
+    // build from the answer, so there is nothing worth caching.
+    resolveProvider: () => store.providerSettings(providerEnvVars(process.env)),
     profiles,
     now: () => Date.now(),
     launchBrowser: launchRobotBrowser,
@@ -75,6 +80,7 @@ const { server } = createServer(manager, {
   store,
   objects,
   storageEnv: storageEnv(process.env),
+  providerEnv: providerEnvVars(process.env),
   downloadsRoot: config.downloadsRoot,
 });
 
@@ -87,6 +93,6 @@ console.log(`Targets come from the database — provider: ${describeProvider(con
 // stop a service whose sessions, files and console are all fine. The point is
 // that a misrouted base URL or a token in the wrong header shows up here
 // rather than as an agent that silently never answers.
-void checkProvider(config)
+void checkProvider(config.provider, config.defaultModel)
   .then((check) => console[check.ok ? "log" : "warn"](formatCheck(check)))
   .catch(() => {});

@@ -5,8 +5,13 @@ export { mintTicket, verifyTicket, type TicketClaims } from "./tickets";
 export { contentTypeFor, isViewable, FALLBACK_CONTENT_TYPE } from "./content-type";
 export {
   ANTHROPIC_MODELS,
+  KNOWN_MODELS,
   modelCatalogue,
   parseModelCatalogue,
+  parseStoredCatalogue,
+  resolveModel,
   withCurrentModel,
   type ModelChoice,
+  type WireFormat,
 } from "./models";
+export { normalizeBaseUrl } from "./provider";

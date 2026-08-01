@@ -9,6 +9,13 @@ import type { Store } from "../store";
 import { contentTypeFor } from "@browserpilot/core";
 import { objectKey, type ObjectStore } from "../storage/object-store";
 import { describeStorage, type StorageEnv } from "../storage/settings";
+import {
+  describeProviderSettings,
+  formatForModel,
+  type ProviderEnv,
+} from "../agent/provider-settings";
+import { checkProvider } from "../agent/preflight";
+import { resolveModel } from "@browserpilot/core";
 
 type SocketData = {
   sessionId: string;
@@ -27,6 +34,8 @@ export type ServerOptions = {
   objects: () => Promise<ObjectStore>;
   /** The storage variables this deployment was started with. */
   storageEnv: StorageEnv;
+  /** The provider variables this deployment was started with. */
+  providerEnv: ProviderEnv;
   /** Where per-session download directories live. */
   downloadsRoot: string;
 };
@@ -54,6 +63,9 @@ const STATUS_FOR: Record<SessionError["code"], number> = {
   login_expired: 409,
   unknown_session: 404,
   not_resumable: 409,
+  // Nothing the caller did wrong, and retrying will not help until an
+  // administrator configures a provider.
+  no_provider: 503,
 };
 
 export function createServer(manager: SessionManager, opts: ServerOptions) {
@@ -159,6 +171,41 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         }
 
         return json({ ...describeStorage(settings), reachable, error });
+      }
+
+      // The same shape of answer for the model provider: what the runtime
+      // would use for the *next* session, proven against the provider rather
+      // than described. `?model=` probes one entry of the catalogue; without
+      // it, the deployment default.
+      if (path === "/api/provider" && req.method === "GET") {
+        if (claims.role !== "ADMIN") return json({ error: "Administrators only" }, 403);
+
+        const settings = await opts.store.providerSettings(opts.providerEnv);
+        const described = describeProviderSettings(settings);
+        if (!settings) return json(described);
+
+        const requested = url.searchParams.get("model")?.trim();
+        const model = resolveModel({
+          requested,
+          fallback: (await opts.store.settings()).defaultModel,
+          catalogue: settings.models,
+        });
+        if (!model) return json({ ...described, reachable: false, error: "No model to check" });
+
+        const check = await checkProvider(
+          { ...settings, format: formatForModel(settings, model) },
+          model,
+          { timeoutMs: 10_000 },
+        );
+
+        return json({
+          ...described,
+          model,
+          reachable: check.ok,
+          rateLimited: check.ok ? Boolean(check.rateLimited) : false,
+          latencyMs: check.ok ? check.latencyMs : undefined,
+          error: check.ok ? undefined : check.detail,
+        });
       }
 
       if (path === "/api/sessions" && req.method === "GET") {

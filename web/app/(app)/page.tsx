@@ -107,7 +107,7 @@ export default async function SessionsPage() {
           </p>
         </div>
 
-        <StartSessionForm sites={startable} models={availableModels()} />
+        <StartSessionForm sites={startable} models={await availableModels()} />
       </div>
 
       {connectedLive.length > 0 ? (

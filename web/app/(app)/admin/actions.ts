@@ -2,7 +2,14 @@
 
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { encryptSecret, generateToken } from "@browserpilot/core";
+import {
+  encryptSecret,
+  generateToken,
+  normalizeBaseUrl,
+  parseStoredCatalogue,
+  resolveModel,
+  type ModelChoice,
+} from "@browserpilot/core";
 import { invites, settings, users } from "@browserpilot/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
@@ -222,6 +229,127 @@ export async function saveStorageSettings(
       driver === "s3"
         ? `Saved. New downloads go to ${bucket}.`
         : "Saved. New downloads are kept on the server's disk.",
+  };
+}
+
+/**
+ * Point the agent at a model provider.
+ *
+ * The whole point of this living in the database is that switching providers —
+ * back to Anthropic, or on to a different gateway — should take effect on the
+ * next session rather than the next redeploy. The runtime re-reads these rows
+ * every time it starts one.
+ */
+export async function saveProviderSettings(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const admin = await requireAdmin();
+
+  const format = String(formData.get("providerFormat") ?? "anthropic") === "openai"
+    ? "openai"
+    : "anthropic";
+  const credentialKind = String(formData.get("providerCredentialKind") ?? "apiKey");
+  const credential = String(formData.get("providerCredential") ?? "");
+  const rawBaseUrl = String(formData.get("providerBaseUrl") ?? "").trim();
+
+  let baseUrl: string;
+  try {
+    // Normalised here as well as in the runtime, so the field shows back what
+    // will actually be used rather than what was pasted.
+    baseUrl = normalizeBaseUrl(rawBaseUrl) ?? "";
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+
+  if (!["oauth", "apiKey", "authToken"].includes(credentialKind)) {
+    return { error: "Choose how the credential should be sent." };
+  }
+
+  let models: ModelChoice[];
+  try {
+    models = parseStoredCatalogue(JSON.parse(String(formData.get("providerModels") ?? "[]")));
+  } catch {
+    return { error: "The model list could not be read. Reload the page and try again." };
+  }
+
+  if (baseUrl && models.length === 0) {
+    // A gateway serves its own line-up; with none listed the console would
+    // offer Claude ids that 404 there, once per session, unexplained.
+    return { error: "List at least one model this provider serves." };
+  }
+
+  const [existing] = await db()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, "providerCredential"))
+    .limit(1);
+
+  if (!credential && !existing) {
+    return { error: "A credential is required the first time." };
+  }
+  if (baseUrl && credentialKind === "oauth") {
+    // It authenticates to Anthropic and nowhere else; every session would fail
+    // on its first model call with someone else's opaque 401.
+    return { error: "A Claude subscription token cannot be used with a gateway." };
+  }
+
+  const writes: Array<{ key: string; value: unknown }> = [
+    { key: "providerFormat", value: format },
+    { key: "providerBaseUrl", value: baseUrl },
+    { key: "providerCredentialKind", value: credentialKind },
+    { key: "providerModels", value: models },
+  ];
+  if (credential) {
+    writes.push({ key: "providerCredential", value: encryptSecret(credential, masterKey()) });
+  }
+
+  for (const write of writes) {
+    await db()
+      .insert(settings)
+      .values({ key: write.key, value: write.value, updatedById: admin.id })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: write.value, updatedById: admin.id, updatedAt: new Date() },
+      });
+  }
+
+  // A default that is no longer in the catalogue would be sent to a provider
+  // that has never heard of it, so it follows the list rather than lingering.
+  const [storedDefault] = await db()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, "defaultModel"))
+    .limit(1);
+
+  const current = typeof storedDefault?.value === "string" ? storedDefault.value : undefined;
+  const resolved = resolveModel({ fallback: undefined, requested: current, catalogue: models });
+  if (resolved && resolved !== current) {
+    await db()
+      .insert(settings)
+      .values({ key: "defaultModel", value: resolved, updatedById: admin.id })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: resolved, updatedById: admin.id, updatedAt: new Date() },
+      });
+  }
+
+  await audit({
+    actorUserId: admin.id,
+    action: "settings.updated",
+    metadata: {
+      providerFormat: format,
+      providerBaseUrl: baseUrl || "https://api.anthropic.com",
+      providerModels: models.map((m) => m.value),
+      credentialChanged: Boolean(credential),
+    },
+  });
+
+  revalidatePath("/admin/models");
+  return {
+    success: `Saved. New sessions use ${baseUrl || "Anthropic"}${
+      resolved && resolved !== current ? `, defaulting to ${resolved}` : ""
+    }.`,
   };
 }
 

@@ -4,6 +4,11 @@ import type { AgentRunner } from "../agent/runner";
 import type { RobotBrowser, SavedCookie } from "../browser/chromium";
 import type { InputSink, RemoteInput } from "../browser/input";
 import type { ScreencastOptions } from "../browser/screencast";
+import {
+  providerSubprocessEnv,
+  type ProviderSettings,
+} from "../agent/provider-settings";
+import { resolveModel } from "@browserpilot/core";
 import { contentTypeFor } from "@browserpilot/core";
 import { objectKey, type ObjectStore } from "../storage/object-store";
 import type { ProfileStore } from "../browser/profiles";
@@ -57,6 +62,12 @@ export type ManagerDeps = {
   createInput: (page: RobotBrowser["page"]) => Promise<InputSink>;
   /** Where downloads are kept. Resolved per use so a settings change lands. */
   objects: () => Promise<ObjectStore>;
+  /**
+   * Which Messages API the agent talks to. Resolved per session for the same
+   * reason downloads are: an administrator switching provider in the console
+   * should take effect on the next session, not the next redeploy.
+   */
+  resolveProvider: () => Promise<ProviderSettings | null>;
   store: Store;
   now: () => number;
 };
@@ -83,7 +94,6 @@ export type ManagerConfig = {
   downloadsRoot: string;
   /** Where a session's disposable copy of a saved profile is put. */
   scratchRoot: string;
-  env: Record<string, string>;
   nodeBin?: string;
 };
 
@@ -159,7 +169,8 @@ export class SessionError extends Error {
       | "not_linked"
       | "login_expired"
       | "unknown_session"
-      | "not_resumable",
+      | "not_resumable"
+      | "no_provider",
   ) {
     super(message);
   }
@@ -289,7 +300,25 @@ export class SessionManager {
       );
     }
 
-    const selectedModel = model?.trim() || settings.defaultModel;
+    // Resolved against the live catalogue rather than taken on trust: a model
+    // an administrator has since removed would otherwise 404 on the first
+    // turn, and the person who picked it would have no way to know why.
+    const provider = await this.deps.resolveProvider();
+    if (!provider) {
+      throw new SessionError(
+        "No model provider is configured — an administrator needs to set one up",
+        "no_provider",
+      );
+    }
+
+    const selectedModel = resolveModel({
+      requested: model,
+      fallback: settings.defaultModel,
+      catalogue: provider.models,
+    });
+    if (!selectedModel) {
+      throw new SessionError("No model is available to run this session", "no_provider");
+    }
     const targetUrl = this.safeContinuationUrl(site.baseUrl, continuation?.targetUrl);
     const id = await store.createSession({
       userId,
@@ -370,7 +399,7 @@ export class SessionManager {
         // A per-session choice wins over the configured default; running
         // sessions keep whatever they started with.
         model: selectedModel,
-        env: this.config.env,
+        env: providerSubprocessEnv(provider),
         nodeBin: this.config.nodeBin,
         sessionId: id,
         saveFile: (filename, bytes) => this.storeBytes(id, downloadsDir, filename, bytes),
@@ -1052,13 +1081,19 @@ export class SessionManager {
         cookies: usesSavedLogin ? (account.cookies ?? undefined) : undefined,
       });
 
+      // A recovered session keeps the model it started with, but the provider
+      // is re-resolved: an administrator may have switched it precisely
+      // because the old one had stopped answering.
+      const provider = await this.deps.resolveProvider();
+      if (!provider) throw new Error("No model provider is configured");
+
       let agent: AgentRunner;
       try {
         agent = await this.deps.startAgent({
           cdpEndpoint: browser.cdpEndpoint,
           site,
           model: session.model ?? (await this.deps.store.settings()).defaultModel,
-          env: this.config.env,
+          env: providerSubprocessEnv(provider),
           nodeBin: this.config.nodeBin,
           sessionId: id,
           saveFile: (filename, bytes) =>

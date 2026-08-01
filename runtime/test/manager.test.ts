@@ -7,7 +7,7 @@ import { Store } from "../src/store";
 import { createLocalStore } from "../src/storage/object-store";
 import type { RobotEvent } from "../src/session/events";
 import { withTestSettings } from "./support/settings";
-import { DB_HEAVY_TIMEOUT_MS } from "./helpers";
+import { DB_HEAVY_TIMEOUT_MS, fakeProvider } from "./helpers";
 
 const url =
   process.env.DATABASE_URL ?? "postgresql://browserpilot:devpassword@127.0.0.1:55432/browserpilot";
@@ -86,6 +86,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
 
   const deps: ManagerDeps = {
     store,
+    resolveProvider: async () => fakeProvider("resume-model"),
     profiles: {
       path: (site, user) => `/tmp/bp-profiles/${site}/${user}`,
       exists: async (site, user) => linked.has(`${site}:${user}`),

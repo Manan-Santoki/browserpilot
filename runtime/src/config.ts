@@ -157,27 +157,6 @@ export function loadConfig(env: Record<string, string | undefined>): RuntimeConf
   };
 }
 
-/** The environment that points the agent subprocess at this provider. */
-export function providerEnv(config: RuntimeConfig): Record<string, string> {
-  const { baseUrl, credential } = config.provider;
-  const env: Record<string, string> = {};
-
-  if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
-
-  switch (credential.kind) {
-    case "oauth":
-      env.CLAUDE_CODE_OAUTH_TOKEN = credential.value;
-      break;
-    case "apiKey":
-      env.ANTHROPIC_API_KEY = credential.value;
-      break;
-    case "authToken":
-      env.ANTHROPIC_AUTH_TOKEN = credential.value;
-      break;
-  }
-
-  return env;
-}
 
 /** One line describing where the agent's tokens are going. Logged at boot. */
 export function describeProvider(config: RuntimeConfig): string {

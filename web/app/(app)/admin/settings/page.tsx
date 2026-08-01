@@ -19,7 +19,7 @@ export default async function SettingsPage() {
 
   // Before an admin has chosen, the head of the catalogue is what the runtime
   // would fall back to — so the form shows the same answer the agent uses.
-  const catalogue = availableModels();
+  const catalogue = await availableModels();
   const defaultModel = String(stored.defaultModel ?? catalogue[0]?.value ?? "");
 
   const current = {
@@ -40,7 +40,7 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForm current={current} models={modelsIncluding(defaultModel)} />
+      <SettingsForm current={current} models={await modelsIncluding(defaultModel)} />
     </div>
   );
 }

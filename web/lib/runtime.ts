@@ -98,6 +98,32 @@ export function runtimeStorageStatus(user: CurrentUser) {
   return call<StorageStatus>(user, "/api/storage");
 }
 
+export type ProviderStatus = {
+  configured: boolean;
+  format?: "anthropic" | "openai";
+  /** Named rather than blank when it is Anthropic's own API. */
+  endpoint?: string;
+  credentialKind?: "oauth" | "apiKey" | "authToken";
+  models?: Array<{ value: string; label: string; vision: boolean; format?: "anthropic" | "openai" }>;
+  /** Which model was probed. Absent when nothing was configured to probe. */
+  model?: string;
+  /** Proven with a one-token request, not asserted. */
+  reachable?: boolean;
+  /** The provider answered but is out of quota — still correctly wired. */
+  rateLimited?: boolean;
+  latencyMs?: number;
+  error?: string;
+};
+
+/**
+ * What the runtime would use for the next session, checked against the
+ * provider. `model` probes one entry of the catalogue rather than the default.
+ */
+export function runtimeProviderStatus(user: CurrentUser, model?: string) {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  return call<ProviderStatus>(user, `/api/provider${query}`);
+}
+
 /** Open a browser for the person to sign in to a site themselves. */
 export function startRuntimeLogin(user: CurrentUser, siteProfileId: string) {
   return call<{ id: string }>(user, "/api/logins", {

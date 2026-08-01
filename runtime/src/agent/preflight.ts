@@ -1,4 +1,5 @@
-import type { AiCredential, RuntimeConfig } from "../config";
+import type { WireFormat } from "@browserpilot/core";
+import type { AiCredential } from "../config";
 
 /**
  * Ask the configured provider whether it will actually answer.
@@ -35,9 +36,23 @@ export type PreflightDeps = {
   timeoutMs?: number;
 };
 
-/** Where the Messages API lives for this provider. */
-export function messagesEndpoint(config: RuntimeConfig): string {
-  return `${config.provider.baseUrl ?? "https://api.anthropic.com"}/v1/messages`;
+/**
+ * The part of a provider this check needs.
+ *
+ * Deliberately narrower than `RuntimeConfig`: the console probes whatever an
+ * administrator has just saved, which is not what the process booted with.
+ */
+export type ProviderTarget = {
+  baseUrl?: string;
+  credential: AiCredential;
+  /** Which API to speak. Anthropic when unsaid, as that is the older path. */
+  format?: WireFormat;
+};
+
+/** Where the chat endpoint lives for this provider, in its own dialect. */
+export function messagesEndpoint(target: ProviderTarget): string {
+  const base = target.baseUrl ?? "https://api.anthropic.com";
+  return target.format === "openai" ? `${base}/v1/chat/completions` : `${base}/v1/messages`;
 }
 
 /**
@@ -89,27 +104,29 @@ function explain(status: number, body: string, credential: AiCredential): string
 }
 
 export async function checkProvider(
-  config: RuntimeConfig,
-  model: string = config.defaultModel,
+  target: ProviderTarget,
+  model: string,
   deps: PreflightDeps = {},
 ): Promise<ProviderCheck> {
   const fetchFn = deps.fetchFn ?? fetch;
-  const endpoint = messagesEndpoint(config);
+  const endpoint = messagesEndpoint(target);
   const started = Date.now();
+  const openai = target.format === "openai";
 
   try {
     const response = await fetchFn(endpoint, {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        // Harmless to an OpenAI-format endpoint, and required by Anthropic's.
         "anthropic-version": "2023-06-01",
-        ...providerHeaders(config.provider.credential),
+        ...providerHeaders(target.credential),
       },
       // The smallest request that still exercises auth, routing and the model
       // id. It stops at the first token, so it costs approximately nothing.
       body: JSON.stringify({
         model,
-        max_tokens: 1,
+        ...(openai ? { max_completion_tokens: 1 } : { max_tokens: 1 }),
         messages: [{ role: "user", content: "ping" }],
       }),
       signal: AbortSignal.timeout(deps.timeoutMs ?? 15_000),
@@ -131,7 +148,7 @@ export async function checkProvider(
         endpoint,
         model,
         status: response.status,
-        detail: explain(response.status, body, config.provider.credential),
+        detail: explain(response.status, body, target.credential),
       };
     }
 

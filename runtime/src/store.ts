@@ -14,6 +14,12 @@ import type { SavedCookie } from "./browser/chromium";
 import type { RobotEvent, SessionStatus } from "./session/events";
 import { parseSettings, type RuntimeSettings } from "./settings";
 import {
+  PROVIDER_KEYS,
+  resolveProviderSettings,
+  type ProviderEnv,
+  type ProviderSettings,
+} from "./agent/provider-settings";
+import {
   STORAGE_KEYS,
   resolveStorageSettings,
   type StorageEnv,
@@ -188,6 +194,21 @@ export class Store {
       .where(inArray(settingsTable.key, [...STORAGE_KEYS]));
 
     return resolveStorageSettings(rows, env, (sealed) => decryptSecret(sealed, this.masterKey));
+  }
+
+  /**
+   * Which Messages API the agent talks to, from the same two sources. Null
+   * when nothing usable is configured — the caller decides what to do about
+   * that, because a runtime with no provider can still serve its files and
+   * its existing sessions.
+   */
+  async providerSettings(env: ProviderEnv): Promise<ProviderSettings | null> {
+    const rows = await this.db
+      .select({ key: settingsTable.key, value: settingsTable.value })
+      .from(settingsTable)
+      .where(inArray(settingsTable.key, [...PROVIDER_KEYS]));
+
+    return resolveProviderSettings(rows, env, (sealed) => decryptSecret(sealed, this.masterKey));
   }
 
   /** Keep the cookies a sign-in produced, sealed with the master key. */

@@ -93,7 +93,16 @@ The runtime strips the `filename` argument from `browser_take_screenshot` before
 
 #### The model provider
 
-The agent talks to exactly one Messages API, resolved at boot in `src/config.ts` and handed to the SDK as subprocess environment. Anthropic is the default; `BP_ANTHROPIC_BASE_URL` routes the same agent through any Anthropic-compatible gateway — OpenCode Zen or Go, LiteLLM, a self-hosted proxy — with no change to the agent loop, the approval gate, the MCP wiring, or the screenshot path. Only the endpoint and the model ids move.
+The agent talks to exactly one Messages API. Anthropic is the default; a base URL routes the same agent through any Anthropic-compatible gateway — OpenCode Zen or Go, LiteLLM, a self-hosted proxy — with no change to the agent loop, the approval gate, the MCP wiring, or the screenshot path. Only the endpoint and the model ids move.
+
+It is resolved **per session, not at boot**, from two sources: the `settings` table, and the environment. Stored settings win where they say anything, exactly as storage settings work — so switching provider from the Models page takes effect on the next session someone starts rather than the next redeploy. `resolveProviderSettings` in `src/agent/provider-settings.ts` is the single place that decides; `Store.providerSettings` feeds it the rows, and the manager asks it once per session.
+
+Two rules there are worth stating because they exist to prevent a specific failure:
+
+- **A stored credential replaces the environment entirely.** Taking the key from the database and the URL from the environment is how one provider's key ends up posted to another provider's endpoint.
+- **Nothing usable resolves to `null`, not an exception.** A runtime with no provider still serves its console, its files and its existing sessions, and says plainly that no model is reachable — the alternative is a service that refuses to boot over a setting an administrator can only fix through that same service.
+
+The environment path remains the way a deployment is wired up before anyone can log in:
 
 | Variable | Meaning |
 |---|---|
@@ -113,7 +122,11 @@ Four things are enforced rather than left to discover at runtime, because every 
 
 **Which credential variable you set is which header the key is sent in**, and gateways disagree about which they want. OpenCode wants `x-api-key` — so `ANTHROPIC_API_KEY` — even though the key it issues starts `sk-` and reads like a bearer token; sent as `Authorization: Bearer` it answers `401 {"type":"AuthError","message":"Missing API key."}`, which names the symptom and not the cause. The preflight's 401 message therefore names the header it used and the variable to move the key to, because that is the entire fix and it is otherwise a guess.
 
-Both services read `BP_MODELS`, the same way both are given `BP_TICKET_SECRET`: it is one value describing one deployment, and a console offering models the runtime cannot run is a failed session with no explanation. The console's pickers render exactly this catalogue, and the admin default-model field is a select rather than a text box — the failure it replaces was a typo that only surfaced as a broken session.
+Both services resolve the catalogue the same way — stored rows first, `BP_MODELS` second — for the same reason both are given `BP_TICKET_SECRET`: it is one answer describing one deployment, and a console offering models the runtime cannot run is a failed session with no explanation. The console's pickers render exactly this catalogue, and the admin default-model field is a select rather than a text box — the failure it replaces was a typo that only surfaced as a broken session.
+
+A catalogue entry carries more than an id and a label. `vision` says whether the model can read an image we send it, which is a property of the model and not the provider: on one OpenCode key `mimo-v2.5` describes a screenshot accurately while `deepseek-v4-flash` rejects the request outright. A blind model still drives pages perfectly — the agent reads them through the accessibility tree — so it is offered, but labelled `· no screenshots` in the picker rather than left to be discovered mid-task. `format` says which API that one model speaks, so a single gateway catalogue can mix both. `KNOWN_MODELS` in `core/src/models.ts` carries the flags we established by actually running each model, offered as one-click presets on the Models page.
+
+**`GET /api/provider`** is the read-only, admin-only counterpart to `GET /api/storage`: it reports what the runtime resolved and then *proves* it with a one-token request, optionally for one named model (`?model=`). The Models page's "Right now" panel and its per-model Test buttons are both that endpoint. It never returns the credential.
 
 `BP_MODELS` must be **quoted** in `.env`: labels contain spaces, and `scripts/dev.sh` sources the file through bash, which otherwise tries to run the second word as a command.
 
