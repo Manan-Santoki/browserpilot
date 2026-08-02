@@ -4,9 +4,11 @@ import {
   createDatabase,
   robotSessions,
   sessionEvents,
+  sessionShares,
   settings as settingsTable,
   siteAccounts,
   siteProfiles,
+  userPermissions,
   users,
   type Database,
 } from "@browserpilot/db";
@@ -51,6 +53,8 @@ export type SessionOwner = {
   email: string;
   name: string;
   role: string;
+  /** The person's saved model preference, applied when no per-session pick. */
+  preferredModel?: string | null;
 };
 
 export type ResumableSession = {
@@ -136,13 +140,39 @@ export class Store {
         name: users.name,
         role: users.role,
         isActive: users.isActive,
+        preferredModel: users.preferredModel,
       })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
 
     if (!row || !row.isActive) return null;
-    return { userId: row.userId, email: row.email, name: row.name, role: row.role };
+    return {
+      userId: row.userId,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      preferredModel: row.preferredModel,
+    };
+  }
+
+  /** Granular permissions a user holds. Admins need none — their role implies all. */
+  async permissions(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ permission: userPermissions.permission })
+      .from(userPermissions)
+      .where(eq(userPermissions.userId, userId));
+    return rows.map((row) => row.permission);
+  }
+
+  /** Whether `sessionId` has been shared with `userId`. */
+  async isShared(sessionId: string, userId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: sessionShares.id })
+      .from(sessionShares)
+      .where(and(eq(sessionShares.robotSessionId, sessionId), eq(sessionShares.userId, userId)))
+      .limit(1);
+    return Boolean(row);
   }
 
   /**

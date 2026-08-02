@@ -105,7 +105,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         // A ticket is scoped to one session; presenting it for another is a
         // privilege-escalation attempt, not a routing mistake.
         if (claims.sessionId !== sessionId) return json({ error: "Ticket is for another session" }, 403);
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
+        if (!(await manager.canView(session, claims.userId, claims.role, claims.perms))) {
           return json({ error: "Not your session" }, 403);
         }
         // Declared in the URL rather than in a message, because the first
@@ -128,6 +128,10 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           model?: string;
         };
         if (!body.siteProfileId) return json({ error: "siteProfileId is required" }, 400);
+
+        if (claims.role !== "ADMIN" && !claims.perms?.includes("session.start")) {
+          return json({ error: "You do not have permission to start sessions" }, 403);
+        }
 
         try {
           const id = await manager.create(
@@ -210,7 +214,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
 
       if (path === "/api/sessions" && req.method === "GET") {
         return json({
-          sessions: manager.listFor(claims.userId, claims.role).map((s) => ({
+          sessions: (await manager.listFor(claims.userId, claims.role, claims.perms)).map((s) => ({
             id: s.id,
             userId: s.userId,
             siteName: s.siteName,
@@ -265,14 +269,19 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         if (!session) {
           const owner = await opts.store.sessionOwner(id);
           if (!owner) return json({ error: "No such session" }, 404);
-          if (claims.role !== "ADMIN" && owner !== claims.userId) {
-            return json({ error: "Not your session" }, 403);
-          }
+          const canStop =
+            claims.role === "ADMIN" ||
+            claims.perms?.includes("session.stop_others") ||
+            owner === claims.userId;
+          if (!canStop) return json({ error: "Not your session" }, 403);
           const cleared = await opts.store.forceStop(id, "browser was already gone");
           return json({ ok: true, cleared });
         }
 
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
+        if (
+          !manager.canControl(session, claims.userId, claims.role) &&
+          !claims.perms?.includes("session.stop_others")
+        ) {
           return json({ error: "Not your session" }, 403);
         }
         await manager.stop(session.id);
@@ -283,7 +292,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
       if (restartMatch && req.method === "POST") {
         const session = manager.get(restartMatch[1]!);
         if (!session) return json({ error: "No such session" }, 404);
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
+        if (!manager.canControl(session, claims.userId, claims.role)) {
           return json({ error: "Not your session" }, 403);
         }
         try {
@@ -320,10 +329,17 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
       const fileListMatch = /^\/api\/sessions\/([^/]+)\/files$/.exec(path);
       if (fileListMatch && req.method === "GET") {
         const sessionId = fileListMatch[1]!;
-        const ownerId = await opts.store.sessionOwner(sessionId);
-        if (!ownerId) return json({ error: "No such session" }, 404);
-        if (claims.role !== "ADMIN" && ownerId !== claims.userId) {
-          return json({ error: "Not your session" }, 403);
+        const live = manager.get(sessionId);
+        if (live) {
+          if (!(await manager.canView(live, claims.userId, claims.role, claims.perms))) {
+            return json({ error: "Not your session" }, 403);
+          }
+        } else {
+          const ownerId = await opts.store.sessionOwner(sessionId);
+          if (!ownerId) return json({ error: "No such session" }, 404);
+          if (claims.role !== "ADMIN" && ownerId !== claims.userId) {
+            return json({ error: "Not your session" }, 403);
+          }
         }
 
         const store = await opts.objects();
@@ -345,7 +361,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         // A finished session still has its files on disk, so fall back to the
         // database for ownership rather than refusing everything after a stop.
         if (live) {
-          if (!manager.canAccess(live, claims.userId, claims.role)) {
+          if (!(await manager.canView(live, claims.userId, claims.role, claims.perms))) {
             return json({ error: "Not your session" }, 403);
           }
         } else {
@@ -423,7 +439,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         });
       },
 
-      message(ws: ServerWebSocket<SocketData>, raw) {
+      async message(ws: ServerWebSocket<SocketData>, raw) {
         let command: ClientCommand;
         try {
           command = JSON.parse(String(raw)) as ClientCommand;
@@ -434,23 +450,33 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         const id = ws.data.sessionId;
         const session = manager.get(id);
         if (!session) return;
-        if (!manager.canAccess(session, ws.data.claims.userId, ws.data.claims.role)) return;
+        // Reading a session — its transcript, its frames — is what sharing and
+        // `session.view_others` grant. Writes below are gated harder.
+        if (!(await manager.canView(session, ws.data.claims.userId, ws.data.claims.role, ws.data.claims.perms))) {
+          return;
+        }
+        const mayControl = manager.canControl(session, ws.data.claims.userId, ws.data.claims.role);
+        const perms = ws.data.claims.perms ?? [];
 
         switch (command.type) {
           case "user_msg":
-            manager.send(id, command.text);
+            if (mayControl) manager.send(id, command.text);
             break;
           case "voice_task_start":
-            manager.startVoiceTask(id, command.requestId, command.text);
+            if (mayControl) manager.startVoiceTask(id, command.requestId, command.text);
             break;
           case "agent_interrupt":
-            void manager.interruptVoiceTask(id, command.requestId);
+            if (mayControl) void manager.interruptVoiceTask(id, command.requestId);
             break;
           case "approval":
-            manager.approve(id, command.requestId, command.approved);
+            // An admin or the owner always decides; `session.approve` lets a
+            // watcher answer an approval on a shared session.
+            if (mayControl || perms.includes("session.approve")) {
+              manager.approve(id, command.requestId, command.approved);
+            }
             break;
           case "choice":
-            manager.choose(id, command.requestId, command.value);
+            if (mayControl) manager.choose(id, command.requestId, command.value);
             break;
           case "preview":
             void manager.setPreview(id, command.enabled);
@@ -469,7 +495,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             }
             break;
           case "stop":
-            void manager.stop(id);
+            if (mayControl || perms.includes("session.stop_others")) void manager.stop(id);
             break;
         }
       },

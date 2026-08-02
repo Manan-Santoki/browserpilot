@@ -7,6 +7,7 @@ import {
   issueGeminiLiveToken,
 } from "@/lib/gemini-live-server";
 import { getCurrentUser } from "@/lib/session";
+import { canViewSession } from "@/lib/session-access";
 
 type ContextEvent = {
   type?: string;
@@ -48,7 +49,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .limit(1);
 
   if (!session) return NextResponse.json({ error: "No such session" }, { status: 404 });
-  if (user.role !== "ADMIN" && session.userId !== user.id) {
+  if (!(await canViewSession(user, id))) {
     return NextResponse.json({ error: "Not your session" }, { status: 403 });
   }
   if (

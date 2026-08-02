@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { robotSessions, siteAccounts, siteProfiles } from "@browserpilot/db";
-import { requireUser } from "@/lib/auth";
+import { robotSessions, sessionShares, siteAccounts, siteProfiles, users } from "@browserpilot/db";
+import { can, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,8 +25,9 @@ function elapsed(from: Date): string {
 
 export default async function SessionsPage() {
   const user = await requireUser();
-  const isAdmin = user.role === "ADMIN";
-  const mine = isAdmin ? undefined : eq(robotSessions.userId, user.id);
+  const seesAll = user.role === "ADMIN" || can(user, "session.view_others");
+  const canStart = user.role === "ADMIN" || can(user, "session.start");
+  const mine = seesAll ? undefined : eq(robotSessions.userId, user.id);
 
   const live = await db()
     .select({
@@ -84,6 +85,25 @@ export default async function SessionsPage() {
       };
     });
 
+  // Sessions other people have granted read access to, joined to their owners
+  // so the card can say who runs them.
+  const sharedRows = await db()
+    .select({
+      id: robotSessions.id,
+      status: robotSessions.status,
+      title: robotSessions.title,
+      startedAt: robotSessions.startedAt,
+      siteName: siteProfiles.name,
+      ownerName: users.name,
+    })
+    .from(sessionShares)
+    .innerJoin(robotSessions, eq(robotSessions.id, sessionShares.robotSessionId))
+    .leftJoin(siteProfiles, eq(siteProfiles.id, robotSessions.siteProfileId))
+    .innerJoin(users, eq(users.id, robotSessions.userId))
+    .where(eq(sessionShares.userId, user.id))
+    .orderBy(desc(robotSessions.startedAt))
+    .limit(12);
+
   const needsYou = connectedLive.filter((s) => s.status === "awaiting_approval").length;
 
   return (
@@ -99,15 +119,17 @@ export default async function SessionsPage() {
                 <span className="text-signal">
                   {needsYou} waiting for you
                 </span>{" "}
-                · {connectedLive.length} running{isAdmin ? " across all users" : ""}.
+                · {connectedLive.length} running{seesAll ? " across all users" : ""}.
               </>
             ) : (
-              `${connectedLive.length} running${isAdmin ? " across all users" : ""}.`
+              `${connectedLive.length} running${seesAll ? " across all users" : ""}.`
             )}
           </p>
         </div>
 
-        <StartSessionForm sites={startable} models={await availableModels()} />
+        {canStart ? (
+          <StartSessionForm sites={startable} models={await availableModels()} />
+        ) : null}
       </div>
 
       {connectedLive.length > 0 ? (
@@ -198,6 +220,34 @@ export default async function SessionsPage() {
           </Card>
         )}
       </section>
+
+      {sharedRows.length > 0 ? (
+        <section>
+          <h2 className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+            Shared with me
+          </h2>
+          <Card className="mt-3 py-0">
+            <ul className="divide-y">
+              {sharedRows.map((session) => (
+                <li key={session.id}>
+                  <Link
+                    href={`/sessions/${session.id}`}
+                    className="hover:bg-accent/50 flex items-center gap-4 px-4 py-3 text-sm transition-colors"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {session.title ?? session.siteName ?? "Session"}
+                    </span>
+                    <span className="text-muted-foreground hidden truncate font-mono text-xs sm:inline">
+                      by {session.ownerName ?? "someone"}
+                    </span>
+                    <StatusLabel status={session.status} className="text-xs" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </section>
+      ) : null}
     </div>
   );
 }

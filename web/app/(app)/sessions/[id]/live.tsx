@@ -32,9 +32,20 @@ type Props = {
   language: string;
   /** The conversation so far, read from the database on the server. */
   initialItems: ChatItem[];
+  /** Watching, not driving: composer, approvals and Stop are hidden. */
+  readOnly?: boolean;
+  /** Who owns the session, for the read-only banner. */
+  ownerName?: string;
 };
 
-export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems }: Props) {
+export function LiveSession({
+  sessionId,
+  runtimeHttpUrl,
+  language,
+  initialItems,
+  readOnly = false,
+  ownerName,
+}: Props) {
   // Seeded from the transcript so a reload shows the conversation, and any
   // approval still waiting for an answer is there to answer.
   const [items, setItems] = useState<ChatItem[]>(initialItems);
@@ -441,8 +452,9 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
         <div ref={logRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm">
           {items.length === 0 ? (
             <p className="text-muted-foreground">
-              Tell the robot what to do. It asks when something is ambiguous, and waits for you
-              before anything destructive.
+              {readOnly
+                ? "Watching this session live. Its owner drives the browser; you can read along."
+                : "Tell the robot what to do. It asks when something is ambiguous, and waits for you before anything destructive."}
             </p>
           ) : null}
 
@@ -541,7 +553,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
                   <Select
                     items={item.options}
                     value={item.resolved?.value ?? null}
-                    disabled={Boolean(item.resolved) || !connected}
+                    disabled={Boolean(item.resolved) || !connected || readOnly}
                     onValueChange={(value) => {
                       if (value) choose(item.requestId, value);
                     }}
@@ -575,12 +587,18 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
                 key={i}
                 className="border-signal/40 bg-signal/5 rounded-lg border px-3 py-2.5"
               >
-                <p className="text-signal font-medium">Waiting for you</p>
+                <p className="text-signal font-medium">
+                  {readOnly ? "Waiting for the owner" : "Waiting for you"}
+                </p>
                 <p className="text-foreground/90 mt-1 font-mono text-xs break-all">
                   {item.summary}
                 </p>
                 {item.resolved ? (
                   <p className="text-muted-foreground mt-2 text-xs">{item.resolved}</p>
+                ) : readOnly ? (
+                  <p className="text-muted-foreground mt-2 text-xs">
+                    {ownerName ?? "The owner"} will decide this one.
+                  </p>
                 ) : (
                   <div className="mt-3 flex gap-2">
                     <Button size="sm" onClick={() => respond(item.requestId, true)}>
@@ -600,6 +618,12 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
           })}
         </div>
 
+        {readOnly ? (
+          <div className="border-muted flex shrink-0 items-center gap-2 border-t px-4 py-3 text-sm text-muted-foreground">
+            Watching{ownerName ? ` ${ownerName}'s` : ""} session — you can&apos;t type, approve, or
+            stop it.
+          </div>
+        ) : (
         <form onSubmit={send} className="flex shrink-0 items-center gap-2 border-t p-2.5">
           <LiveVoice
             ref={liveVoiceRef}
@@ -648,6 +672,7 @@ export function LiveSession({ sessionId, runtimeHttpUrl, language, initialItems 
             <SendIcon />
           </Button>
         </form>
+        )}
       </Card>
     </div>
   );

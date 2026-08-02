@@ -12,7 +12,10 @@ export function db(): Database {
   if (!cached) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is required");
-    cached = createDatabase(url);
+    // Bounded and short-lived: the console shares its database with the
+    // runtime and a production deployment, and a leaked pool must not be able
+    // to exhaust the server's connection limit.
+    cached = createDatabase(url, { max: 3, idleTimeout: 20, maxLifetime: 300 });
   }
   return cached;
 }

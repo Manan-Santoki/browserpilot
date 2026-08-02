@@ -3,7 +3,6 @@
 import { useActionState, useState } from "react";
 import { KNOWN_MODELS, type ModelChoice } from "@browserpilot/core";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -15,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { saveProviderSettings, type AdminState } from "../actions";
+import { AdminSaveBar, AdminSection } from "../shell";
 
 const initial: AdminState = {};
 
@@ -24,9 +24,9 @@ const FORMATS = [
 ];
 
 const CREDENTIAL_KINDS = [
-  { value: "apiKey", label: "API key · sent as x-api-key" },
-  { value: "authToken", label: "Bearer token · sent as Authorization" },
-  { value: "oauth", label: "Claude subscription token" },
+  { value: "apiKey", label: "API key (x-api-key header)" },
+  { value: "authToken", label: "Bearer token (Authorization header)" },
+  { value: "oauth", label: "Claude subscription (OAuth) token" },
 ];
 
 type Current = {
@@ -82,15 +82,11 @@ export function ProviderForm({ current }: { current: Current }) {
     <form action={action} className="space-y-6">
       <input type="hidden" name="providerModels" value={JSON.stringify(models)} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Where the agent thinks</CardTitle>
-          <CardDescription>
-            Leave the address empty to use Anthropic directly. Point it at a gateway — OpenCode, or
-            anything that speaks either API — to run other models instead.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <AdminSection
+        title="Where the agent thinks"
+        description="Leave the address empty to use Anthropic directly. Point it at a gateway — OpenCode, or anything that speaks either API — to run other models instead."
+      >
+        <div className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="providerBaseUrl">
               Address <span className="text-muted-foreground font-normal">(optional)</span>
@@ -108,14 +104,14 @@ export function ProviderForm({ current }: { current: Current }) {
           </div>
 
           <div className="space-y-2">
-            <Label>API this provider speaks</Label>
+            <Label htmlFor="providerFormat">API it speaks</Label>
             <Select
               name="providerFormat"
               value={format}
               onValueChange={(v) => setFormat(v ?? "anthropic")}
               items={FORMATS}
             >
-              <SelectTrigger className="w-full" aria-label="Wire format">
+              <SelectTrigger id="providerFormat" className="w-full" aria-label="Wire format">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -127,38 +123,38 @@ export function ProviderForm({ current }: { current: Current }) {
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-xs">
-              A model in the list below can override this, so one gateway can serve both.
+              How requests are framed. A model in the list below can override this, so one gateway
+              can serve both kinds.
             </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </AdminSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Credential</CardTitle>
-          <CardDescription>
-            How the key is sent is not cosmetic — the same key in the wrong header is a bare 401.
-            Providers disagree; if one rejects you, try the other.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Select
-            name="providerCredentialKind"
-            value={credentialKind}
-            onValueChange={(v) => setCredentialKind(v ?? "apiKey")}
-            items={CREDENTIAL_KINDS}
-          >
-            <SelectTrigger className="w-full" aria-label="Credential kind">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CREDENTIAL_KINDS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <AdminSection
+        title="Credential"
+        description="The same key in the wrong header is a bare 401, so how it is sent matters. If a provider rejects you, try the other kind."
+      >
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="providerCredentialKind">Type of key</Label>
+            <Select
+              name="providerCredentialKind"
+              value={credentialKind}
+              onValueChange={(v) => setCredentialKind(v ?? "apiKey")}
+              items={CREDENTIAL_KINDS}
+            >
+              <SelectTrigger id="providerCredentialKind" className="w-full" aria-label="Credential kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CREDENTIAL_KINDS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="providerCredential">Key</Label>
@@ -172,19 +168,14 @@ export function ProviderForm({ current }: { current: Current }) {
               Encrypted before it is stored, and never shown again.
             </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </AdminSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Models on offer</CardTitle>
-          <CardDescription>
-            Exactly these appear in the session picker. A model that cannot see images still drives
-            pages perfectly — it reads them as structure — but it cannot answer &ldquo;what does this
-            look like&rdquo;.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <AdminSection
+        title="Models on offer"
+        description="Exactly these appear in the session picker. A model that cannot see images still drives pages perfectly — it reads them as structure — but it cannot answer “what does this look like”."
+      >
+        <div className="space-y-4">
           {models.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               None yet. Add one below, or pick from the models we have tested.
@@ -294,19 +285,10 @@ export function ProviderForm({ current }: { current: Current }) {
               </div>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </AdminSection>
 
-      {state.error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {state.error}
-        </p>
-      ) : null}
-      {state.success ? <p className="text-running text-sm">{state.success}</p> : null}
-
-      <Button type="submit" disabled={pending}>
-        {pending ? "Saving…" : "Save provider"}
-      </Button>
+      <AdminSaveBar pending={pending} label="Save provider" error={state.error} success={state.success} />
     </form>
   );
 }

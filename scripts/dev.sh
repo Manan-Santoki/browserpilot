@@ -17,6 +17,17 @@ if [ -f "$ROOT/.env" ]; then
   set -a
   # shellcheck disable=SC1091
   . "$ROOT/.env"
+
+  # Personal overrides, sourced second so they win. This exists for one
+  # specific hazard: `.env` points at the deployed database, and a runtime
+  # booting against it marks every *live* session there as interrupted — so a
+  # developer starting the stack kills the sessions real people are watching.
+  # Point DATABASE_URL at a local Postgres here and that cannot happen.
+  if [ -f "$ROOT/.env.local" ]; then
+    # shellcheck disable=SC1091
+    . "$ROOT/.env.local"
+    echo "using overrides from .env.local"
+  fi
   set +a
 else
   echo "No $ROOT/.env — copy .env.example and fill it in first." >&2

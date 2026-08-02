@@ -51,10 +51,56 @@ export const users = pgTable(
     role: userRole("role").notNull().default("USER"),
     isActive: boolean("is_active").notNull().default(true),
     preferredLanguage: text("preferred_language").notNull().default("en"),
+    /** The person's usual model. Beats the deployment default, loses to a per-session pick. */
+    preferredModel: text("preferred_model"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("users_email_key").on(t.email)],
+);
+
+/**
+ * Granular permissions that refine the coarse `USER` role. `ADMIN` implies
+ * every permission, so a person with the role needs no rows here; a `USER`
+ * does nothing beyond what these rows grant.
+ */
+export const userPermissions = pgTable(
+  "user_permissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    permission: text("permission").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("user_permissions_user_permission_key").on(t.userId, t.permission),
+    index("user_permissions_user_id_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Who a session's owner has granted read-only access to. A share lets the
+ * grantee watch a session and nothing more — no typing, no approvals.
+ */
+export const sessionShares = pgTable(
+  "session_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    robotSessionId: uuid("robot_session_id")
+      .notNull()
+      .references(() => robotSessions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    grantedById: uuid("granted_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("session_shares_session_user_key").on(t.robotSessionId, t.userId),
+    index("session_shares_user_id_idx").on(t.userId),
+  ],
 );
 
 /** Console login sessions. The cookie carries the id; the secret is stored hashed. */

@@ -2,7 +2,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { generateToken, hashToken } from "@browserpilot/core";
-import { users, webSessions } from "@browserpilot/db";
+import { userPermissions, users, webSessions } from "@browserpilot/db";
 import { db } from "./db";
 
 export const SESSION_COOKIE = "bp_session";
@@ -25,6 +25,9 @@ export type CurrentUser = {
   name: string;
   role: "ADMIN" | "USER";
   preferredLanguage: string;
+  /** Granular permissions. An admin's role implies all of them. */
+  perms: string[];
+  preferredModel?: string | null;
 };
 
 /**
@@ -77,6 +80,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       name: users.name,
       role: users.role,
       preferredLanguage: users.preferredLanguage,
+      preferredModel: users.preferredModel,
       isActive: users.isActive,
     })
     .from(webSessions)
@@ -94,12 +98,19 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   // A deactivated account keeps its session rows but must not be able to act.
   if (!found || !found.isActive) return null;
 
+  const permRows = await db()
+    .select({ permission: userPermissions.permission })
+    .from(userPermissions)
+    .where(eq(userPermissions.userId, found.id));
+
   return {
     id: found.id,
     email: found.email,
     name: found.name,
     role: found.role,
     preferredLanguage: found.preferredLanguage,
+    preferredModel: found.preferredModel,
+    perms: permRows.map((row) => row.permission),
   };
 }
 

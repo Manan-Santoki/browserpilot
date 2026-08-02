@@ -27,3 +27,4 @@ mobile/.expo/
 
 # Built app artifacts.
 dist/
+.env.local

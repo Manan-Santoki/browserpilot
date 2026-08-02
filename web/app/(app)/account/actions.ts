@@ -6,7 +6,6 @@ import { users, webSessions } from "@browserpilot/db";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-
 export type AccountState = { error?: string; success?: string };
 
 export async function changePassword(
@@ -55,4 +54,11 @@ export async function setLanguage(formData: FormData): Promise<void> {
   if (!["en", "hi", "gu"].includes(language)) return;
 
   await db().update(users).set({ preferredLanguage: language }).where(eq(users.id, user.id));
+}
+
+export async function setPreferredModel(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const model = String(formData.get("model") ?? "").trim() || null;
+
+  await db().update(users).set({ preferredModel: model }).where(eq(users.id, user.id));
 }

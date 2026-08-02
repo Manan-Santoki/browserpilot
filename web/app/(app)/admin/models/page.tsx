@@ -1,13 +1,13 @@
 import { settings } from "@browserpilot/db";
 import { parseStoredCatalogue } from "@browserpilot/core";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { runtimeProviderStatus } from "@/lib/runtime";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdminHeader, AdminStatus, type StatusItem } from "../shell";
 import { ProviderForm } from "./form";
 
 export default async function ModelsPage() {
-  const admin = await requireAdmin();
+  const admin = await requirePermission("model.manage");
   const status = await runtimeProviderStatus(admin);
 
   const rows = await db().select().from(settings);
@@ -24,51 +24,57 @@ export default async function ModelsPage() {
     models: parseStoredCatalogue(stored.providerModels),
   };
 
-  return (
-    <div className="mx-auto w-full max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Models</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Which service the agent sends its thinking to, and which models it may run there. Changes
-          apply to the next session that starts — no redeploy.
-        </p>
-      </div>
+  // How "Right now" reads, proven against the provider rather than described.
+  let statusItems: StatusItem[];
+  if (!status.ok) {
+    statusItems = [
+      {
+        label: "Provider",
+        value: "Unreachable",
+        tone: "bad",
+        hint: "The browser service did not answer.",
+      },
+    ];
+  } else if (!status.data.configured) {
+    statusItems = [
+      {
+        label: "Provider",
+        value: "Not configured",
+        tone: "warn",
+        hint: "Sessions cannot start until one is saved below.",
+      },
+    ];
+  } else {
+    statusItems = [
+      {
+        label: "Endpoint",
+        value: status.data.endpoint ?? "Anthropic",
+        tone: status.data.reachable ? "ok" : "bad",
+        hint: status.data.error,
+      },
+      {
+        label: "Probed model",
+        value: status.data.model ?? "—",
+        tone: status.data.reachable ? (status.data.rateLimited ? "warn" : "ok") : "bad",
+        hint: status.data.reachable
+          ? status.data.rateLimited
+            ? "rate limited"
+            : `answered in ${status.data.latencyMs}ms`
+          : undefined,
+      },
+    ];
+  }
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Right now</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm">
-          {!status.ok ? (
-            <p className="text-destructive">
-              The browser service did not answer, so this cannot be confirmed: {status.error}
-            </p>
-          ) : !status.data.configured ? (
-            <p className="text-destructive">
-              <span className="lamp lamp-waiting" aria-hidden /> No provider is configured. Sessions
-              cannot start until one is saved below.
-            </p>
-          ) : status.data.reachable ? (
-            <p>
-              <span className="lamp lamp-idle" aria-hidden />{" "}
-              <span className="font-mono text-xs">{status.data.model}</span> answered from{" "}
-              <span className="font-mono text-xs">{status.data.endpoint}</span>
-              {status.data.rateLimited
-                ? " — rate limited, but the address and credential are right."
-                : ` in ${status.data.latencyMs}ms.`}
-            </p>
-          ) : (
-            <p className="text-destructive">
-              <span className="lamp lamp-waiting" aria-hidden />{" "}
-              <span className="font-mono text-xs">{status.data.endpoint}</span> did not answer for{" "}
-              <span className="font-mono text-xs">{status.data.model}</span>
-              {status.data.error ? `: ${status.data.error}` : "."}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+  return (
+    <>
+      <AdminHeader
+        title="Models"
+        description="Which service the agent sends its thinking to, and which models it may run there. Changes apply to the next session that starts — no redeploy."
+      />
+
+      <AdminStatus items={statusItems} />
 
       <ProviderForm current={current} />
-    </div>
+    </>
   );
 }

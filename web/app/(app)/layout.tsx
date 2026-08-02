@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireUser } from "@/lib/auth";
+import { hasAdminAccess, requireUser } from "@/lib/auth";
 import { Separator } from "@/components/ui/separator";
 import { AppNavLink } from "@/components/app-nav-link";
 import { logout } from "./actions";
@@ -13,6 +13,7 @@ const NAV = [
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  const adminAccess = hasAdminAccess(user);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -40,7 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </AppNavLink>
           ))}
 
-          {user.role === "ADMIN" ? (
+          {adminAccess ? (
             <>
               <Separator className="my-2" />
               <AppNavLink
@@ -93,7 +94,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 {item.label}
               </AppNavLink>
             ))}
-            {user.role === "ADMIN" ? (
+            {adminAccess ? (
               <AppNavLink href="/admin" activeClassName="text-foreground font-medium">
                 Admin
               </AppNavLink>

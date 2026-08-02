@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { encryptSecret } from "@browserpilot/core";
 import { robotSessions, siteAccounts, siteProfiles } from "@browserpilot/db";
 import { audit } from "@/lib/audit";
-import { requireAdmin, requireUser } from "@/lib/auth";
+import { requirePermission, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export type FormState = { error?: string; success?: string };
@@ -17,7 +17,7 @@ export type FormState = { error?: string; success?: string };
  * the target. Running sessions are refused rather than orphaned.
  */
 export async function deleteSite(formData: FormData): Promise<void> {
-  const admin = await requireAdmin();
+  const admin = await requirePermission("site.manage");
   const siteProfileId = String(formData.get("siteProfileId") ?? "");
   if (!siteProfileId) return;
 
@@ -63,7 +63,7 @@ function masterKey(): string {
 
 /** Registering a target is an administrative act — it grants reach into another system. */
 export async function createSite(_prev: FormState, formData: FormData): Promise<FormState> {
-  const admin = await requireAdmin();
+  const admin = await requirePermission("site.manage");
 
   const name = String(formData.get("name") ?? "").trim();
   const baseUrl = String(formData.get("baseUrl") ?? "").trim().replace(/\/+$/, "");

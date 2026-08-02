@@ -318,6 +318,7 @@ export class SessionManager {
 
     const selectedModel = resolveModel({
       requested: model,
+      preferred: owner.preferredModel,
       fallback: settings.defaultModel,
       catalogue: provider.models,
     });
@@ -714,13 +715,41 @@ export class SessionManager {
     return [...this.sessions.values()];
   }
 
-  /** Sessions a given user is allowed to see. Admins see everything. */
-  listFor(userId: string, role: string): Session[] {
-    return role === "ADMIN" ? this.list() : this.list().filter((s) => s.userId === userId);
+  /**
+   * Sessions a given user is allowed to see: their own, everyone's for an
+   * admin, anything granted by `session.view_others`, and what was shared with
+   * them.
+   */
+  async listFor(
+    userId: string,
+    role: string,
+    perms?: string[],
+  ): Promise<Session[]> {
+    if (role === "ADMIN") return this.list();
+    const visible: Session[] = [];
+    for (const session of this.list()) {
+      if (await this.canView(session, userId, role, perms)) visible.push(session);
+    }
+    return visible;
   }
 
-  canAccess(session: Session, userId: string, role: string): boolean {
+  /**
+   * Whether this user may operate a session — the owner, or an admin. A
+   * viewer, however legitimately granted read access, must not be able to type,
+   * approve, or stop.
+   */
+  canControl(session: Session, userId: string, role: string): boolean {
     return role === "ADMIN" || session.userId === userId;
+  }
+
+  /**
+   * Whether this user may watch a session: the owner, an admin, someone with
+   * the `session.view_others` permission, or someone the owner shared it with.
+   */
+  async canView(session: Session, userId: string, role: string, perms?: string[]): Promise<boolean> {
+    if (this.canControl(session, userId, role)) return true;
+    if (perms?.includes("session.view_others")) return true;
+    return this.deps.store.isShared(session.id, userId);
   }
 
   subscribe(id: string, listener: (event: RobotEvent) => void): () => void {

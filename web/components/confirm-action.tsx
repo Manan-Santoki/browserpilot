@@ -27,6 +27,11 @@ type Props = {
   destructive?: boolean;
   size?: "sm" | "default";
   variant?: "default" | "outline" | "ghost" | "secondary" | "destructive";
+  /**
+   * Render the trigger as a menu item instead of a standalone button, for use
+   * inside a DropdownMenu.
+   */
+  dropdown?: boolean;
 };
 
 /**
@@ -48,6 +53,7 @@ export function ConfirmAction({
   destructive,
   size = "sm",
   variant,
+  dropdown,
 }: Props) {
   const [open, setOpen] = useState(false);
 
@@ -55,11 +61,24 @@ export function ConfirmAction({
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger
         render={
-          <Button
-            size={size}
-            variant={variant ?? (destructive ? "ghost" : "outline")}
-            className={destructive ? "text-destructive hover:text-destructive" : undefined}
-          />
+          dropdown ? (
+            <button
+              type="button"
+              className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground ${
+                destructive
+                  ? "text-destructive focus:bg-destructive/10 focus:text-destructive"
+                  : ""
+              }`}
+            >
+              {label}
+            </button>
+          ) : (
+            <Button
+              size={size}
+              variant={variant ?? (destructive ? "ghost" : "outline")}
+              className={destructive ? "text-destructive hover:text-destructive" : undefined}
+            />
+          )
         }
       >
         {label}

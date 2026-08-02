@@ -1,12 +1,12 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { robotSessions, sessionEvents, siteProfiles } from "@browserpilot/db";
-import { requireUser } from "@/lib/auth";
+import { can, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { FilesList, type SessionFiles } from "./files-list";
 
 export default async function FilesPage() {
   const user = await requireUser();
-  const isAdmin = user.role === "ADMIN";
+  const seesAll = user.role === "ADMIN" || can(user, "session.view_others");
 
   // Which sessions may this person see?
   const sessions = await db()
@@ -18,7 +18,7 @@ export default async function FilesPage() {
     })
     .from(robotSessions)
     .leftJoin(siteProfiles, eq(siteProfiles.id, robotSessions.siteProfileId))
-    .where(isAdmin ? undefined : eq(robotSessions.userId, user.id))
+    .where(seesAll ? undefined : eq(robotSessions.userId, user.id))
     .orderBy(desc(robotSessions.startedAt))
     .limit(300);
 
@@ -84,7 +84,7 @@ export default async function FilesPage() {
           {total === 0
             ? "Everything the robot downloads is kept here."
             : `${total} file${total === 1 ? "" : "s"}${
-                isAdmin ? " across all users" : ""
+                seesAll ? " across all users" : ""
               }, under the session that fetched them.`}
         </p>
       </div>

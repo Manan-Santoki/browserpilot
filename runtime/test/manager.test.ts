@@ -301,13 +301,15 @@ describe("ownership", () => {
     const id = await manager.create(userId, siteId);
     const session = manager.get(id)!;
 
-    expect(manager.listFor(userId, "USER")).toHaveLength(1);
-    expect(manager.listFor(otherUserId, "USER")).toHaveLength(0);
-    expect(manager.listFor(otherUserId, "ADMIN")).toHaveLength(1);
+    expect(await manager.listFor(userId, "USER")).toHaveLength(1);
+    expect(await manager.listFor(otherUserId, "USER")).toHaveLength(0);
+    expect(await manager.listFor(otherUserId, "ADMIN")).toHaveLength(1);
 
-    expect(manager.canAccess(session, userId, "USER")).toBe(true);
-    expect(manager.canAccess(session, otherUserId, "USER")).toBe(false);
-    expect(manager.canAccess(session, otherUserId, "ADMIN")).toBe(true);
+    expect(manager.canControl(session, userId, "USER")).toBe(true);
+    expect(manager.canControl(session, otherUserId, "USER")).toBe(false);
+    expect(manager.canControl(session, otherUserId, "ADMIN")).toBe(true);
+    expect(await manager.canView(session, otherUserId, "USER", ["session.view_others"])).toBe(true);
+    expect(await manager.canView(session, otherUserId, "USER")).toBe(false);
 
     await manager.stop(id);
     await cleanupSessions();

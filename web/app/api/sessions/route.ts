@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { robotSessions, siteProfiles } from "@browserpilot/db";
 import { audit } from "@/lib/audit";
+import { can } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { listRuntimeSessions, startRuntimeSession } from "@/lib/runtime";
 import { getCurrentUser } from "@/lib/session";
@@ -29,7 +30,9 @@ export async function GET() {
     })
     .from(robotSessions)
     .leftJoin(siteProfiles, eq(siteProfiles.id, robotSessions.siteProfileId))
-    .where(user.role === "ADMIN" ? undefined : eq(robotSessions.userId, user.id))
+    .where(user.role === "ADMIN" || can(user, "session.view_others")
+      ? undefined
+      : eq(robotSessions.userId, user.id))
     .orderBy(desc(robotSessions.startedAt))
     .limit(40);
 
@@ -68,6 +71,10 @@ export async function POST(req: Request) {
   };
   if (!body.siteProfileId) {
     return NextResponse.json({ error: "Choose a site first" }, { status: 400 });
+  }
+
+  if (!can(user, "session.start")) {
+    return NextResponse.json({ error: "You do not have permission to start sessions" }, { status: 403 });
   }
 
   const result = await startRuntimeSession(user, body.siteProfileId, body.title, body.model);

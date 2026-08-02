@@ -16,7 +16,10 @@ function ticketSecret(): string {
  * it travels in a URL, where it can end up in logs.
  */
 export async function ticketFor(user: CurrentUser, sessionId: string): Promise<string> {
-  return mintTicket({ sessionId, userId: user.id, role: user.role }, ticketSecret());
+  return mintTicket(
+    { sessionId, userId: user.id, role: user.role, perms: user.perms },
+    ticketSecret(),
+  );
 }
 
 export type RuntimeSession = {

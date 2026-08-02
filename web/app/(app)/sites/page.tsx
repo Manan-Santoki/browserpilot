@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { siteAccounts, siteProfiles } from "@browserpilot/db";
-import { requireUser } from "@/lib/auth";
+import { can, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { deleteSite } from "./actions";
 import { beginSiteLogin } from "./login-actions";
@@ -17,6 +17,7 @@ export default async function SitesPage({
 }) {
   const user = await requireUser();
   const { error, saved } = await searchParams;
+  const managesSites = user.role === "ADMIN" || can(user, "site.manage");
 
   const sites = await db()
     .select({
@@ -67,7 +68,7 @@ export default async function SitesPage({
         <div className="rounded-lg border border-dashed px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">
             No sites registered yet.
-            {user.role === "ADMIN"
+            {managesSites
               ? " Add one below."
               : " Ask an administrator to register one."}
           </p>
@@ -136,7 +137,7 @@ export default async function SitesPage({
                 )}
               </div>
 
-              {user.role === "ADMIN" ? (
+              {managesSites ? (
                 <ConfirmAction
                   action={deleteSite}
                   fields={{ siteProfileId: site.id }}
@@ -152,7 +153,7 @@ export default async function SitesPage({
         </ul>
       )}
 
-      {user.role === "ADMIN" ? (
+      {managesSites ? (
         <Card className="max-w-2xl">
           <CardHeader>
             <CardTitle>Register a site</CardTitle>
