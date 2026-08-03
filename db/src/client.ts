@@ -11,6 +11,16 @@ export type DatabaseOptions = {
   idleTimeout?: number;
   /** Seconds a connection may live before it is recycled. Default 3600. */
   maxLifetime?: number;
+  /**
+   * Whether to use named prepared statements. Default true.
+   *
+   * Turn it off only for a transaction-mode pooler that does *not* track
+   * prepared statements: there a client gets whichever server connection is
+   * free per transaction, so a statement prepared on one is missing from the
+   * next. Ours does track them — see `max_prepared_statements` in the
+   * pgbouncer compose file — so the default stands.
+   */
+  prepare?: boolean;
 };
 
 /**
@@ -19,14 +29,12 @@ export type DatabaseOptions = {
  * console), with no generated client to resolve — which is what makes one
  * schema usable from both.
  */
-export function createDatabase(
-  connectionString: string,
-  options: DatabaseOptions = {},
-) {
+export function createDatabase(connectionString: string, options: DatabaseOptions = {}) {
   const sql = postgres(connectionString, {
     max: options.max ?? 10,
     idle_timeout: options.idleTimeout ?? 30,
     max_lifetime: options.maxLifetime ?? 3600,
+    prepare: options.prepare ?? true,
   });
   return drizzle(sql, { schema });
 }
