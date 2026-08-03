@@ -555,4 +555,87 @@ describe("the AI SDK engine", () => {
       expect(h.events.some((e) => e.type === "screenshot")).toBe(true);
     });
   });
+
+  describe("interrupting", () => {
+    /**
+     * A model that streams slowly and stops when the request is aborted.
+     *
+     * Honouring the signal is what a real provider does — it is the HTTP
+     * request being cancelled. `simulateReadableStream` ignores it, so a mock
+     * built on that alone would test the mock rather than the engine.
+     */
+    function slowModel() {
+      return new MockLanguageModelV4({
+        doStream: async ({ abortSignal }: { abortSignal?: AbortSignal }) => ({
+          stream: new ReadableStream({
+            async start(controller) {
+              controller.enqueue({ type: "text-start", id: "t1" });
+              for (let i = 0; i < 40; i++) {
+                if (abortSignal?.aborted) {
+                  controller.error(new DOMException("Aborted", "AbortError"));
+                  return;
+                }
+                controller.enqueue({ type: "text-delta", id: "t1", delta: `part ${i} ` });
+                await Bun.sleep(30);
+              }
+              controller.enqueue({ type: "text-end", id: "t1" });
+              controller.enqueue(finish);
+              controller.close();
+            },
+          }),
+        }),
+      });
+    }
+
+    test("stops the turn and leaves the session able to take another", async () => {
+      // The contract is not "the turn dies" but "the turn dies and the session
+      // does not" — an interrupt that also killed the conversation would make
+      // the Stop button a session-ending button.
+      const h = harness();
+      const browser = fakeBrowser(() => text("ok"));
+
+      const agent = await startAiSdkAgent(
+        { ...h.opts, model: "test-model" },
+        { model: slowModel(), connect: async () => browser.tools },
+      );
+
+      agent.send("count slowly");
+      await h.waitFor((events) => events.some((e) => e.type === "agent_text_delta"));
+      await agent.interrupt();
+
+      await h.waitFor(turnDone);
+      const outcome = h.events.find((e) => e.type === "agent_turn_complete");
+      expect(outcome).toMatchObject({ outcome: "interrupted" });
+
+      // And the loop is still there to serve the next message.
+      h.events.length = 0;
+      agent.send("are you still there?");
+      await h.waitFor(turnDone);
+      expect(h.events.some((e) => e.type === "agent_turn_complete")).toBe(true);
+
+      await agent.stop();
+    });
+
+    test("a pending approval is declined rather than left hanging", async () => {
+      // Otherwise the tool's execute() never settles and the turn cannot end.
+      const h = harness();
+      const browser = fakeBrowser(() => text("clicked"));
+
+      const agent = await startAiSdkAgent(
+        { ...h.opts, model: "test-model" },
+        {
+          model: callsTool("browser_click", { element: "Delete order" }, "Done."),
+          connect: async () => browser.tools,
+        },
+      );
+
+      agent.send("delete order 42");
+      await h.waitFor((events) => events.some((e) => e.type === "approval_request"));
+      await agent.interrupt();
+
+      await h.waitFor(turnDone);
+      expect(browser.calls).toHaveLength(0);
+      await agent.stop();
+    });
+  });
 });

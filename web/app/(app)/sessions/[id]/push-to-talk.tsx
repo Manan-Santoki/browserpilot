@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -132,28 +133,34 @@ export function PushToTalk({ language, disabled, onTranscript }: Props) {
 
   return (
     <div className="flex items-center gap-2">
-      <Button
-        type="button"
-        variant={recording ? "destructive" : "outline"}
-        size="icon"
-        onClick={recording ? stop : start}
-        disabled={disabled || busy}
-        aria-label={recording ? "Stop recording" : "Dictate a message"}
-        title={
-          recording
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant={recording ? "destructive" : "outline"}
+              size="icon"
+              onClick={recording ? stop : start}
+              disabled={disabled || busy}
+              aria-label={recording ? "Stop recording" : "Dictate a message"}
+              className={recording ? "animate-pulse" : undefined}
+            >
+              {busy ? (
+                <Loader2Icon className="animate-spin" />
+              ) : recording ? (
+                <SquareIcon />
+              ) : (
+                <MicIcon />
+              )}
+            </Button>
+          }
+        />
+        <TooltipContent>
+          {recording
             ? "Stop and transcribe"
-            : "Dictate a message — the words go into the box for you to check"
-        }
-        className={recording ? "animate-pulse" : undefined}
-      >
-        {busy ? (
-          <Loader2Icon className="animate-spin" />
-        ) : recording ? (
-          <SquareIcon />
-        ) : (
-          <MicIcon />
-        )}
-      </Button>
+            : "Dictate a message — the words go into the box for you to check"}
+        </TooltipContent>
+      </Tooltip>
 
       {error ? (
         <span role="alert" className="text-destructive text-xs">

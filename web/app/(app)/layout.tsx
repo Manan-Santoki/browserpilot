@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { hasAdminAccess, requireUser } from "@/lib/auth";
 import { Separator } from "@/components/ui/separator";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppNavLink } from "@/components/app-nav-link";
 import { logout } from "./actions";
 
@@ -15,7 +16,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   const adminAccess = hasAdminAccess(user);
 
+  // One provider for the whole console: it is what shares the open/close
+  // delay between tooltips, so moving between two adjacent controls does not
+  // replay the delay on each.
   return (
+    <TooltipProvider delay={300}>
     <div className="flex h-screen overflow-hidden">
       {/* A left rail rather than a top bar: a console is navigated rarely and
           watched constantly, so navigation should sit out of the way. */}
@@ -110,5 +115,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
     </div>
+    </TooltipProvider>
   );
 }

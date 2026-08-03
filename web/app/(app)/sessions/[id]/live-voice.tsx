@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { AudioLinesIcon, SquareIcon } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   GeminiLiveClient,
@@ -470,20 +471,28 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, Props>(function LiveVoice(
           robot or you are not — and it sat beside the dictation mic as an
           identical grey square distinguished only by its tooltip. A waveform,
           a word, and the signal colour when live make it a different thing. */}
-      <Button
-        type="button"
-        size="sm"
-        variant={active ? "default" : "outline"}
-        onClick={() => (active ? stop() : void start())}
-        disabled={!runtimeConnected}
-        aria-pressed={active}
-        aria-label={active ? "Stop talking to the robot" : "Talk to the robot"}
-        title={active ? "Stop talking to the robot" : "Talk to the robot — it answers out loud"}
-        className={active ? "gap-1.5" : "text-muted-foreground gap-1.5"}
-      >
-        {active ? <SquareIcon /> : <AudioLinesIcon />}
-        Voice
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="sm"
+              variant={active ? "default" : "outline"}
+              onClick={() => (active ? stop() : void start())}
+              disabled={!runtimeConnected}
+              aria-pressed={active}
+              aria-label={active ? "Stop talking to the robot" : "Talk to the robot"}
+              className={active ? "gap-1.5" : "text-muted-foreground gap-1.5"}
+            >
+              {active ? <SquareIcon /> : <AudioLinesIcon />}
+              Voice
+            </Button>
+          }
+        />
+        <TooltipContent>
+          {active ? "Stop talking to the robot" : "Talk to the robot — it answers out loud"}
+        </TooltipContent>
+      </Tooltip>
       {active ? (
         <div className="hidden min-w-0 max-w-44 sm:block">
           <p className="text-signal truncate text-xs font-medium">{label}</p>

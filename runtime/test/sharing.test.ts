@@ -47,7 +47,9 @@ function start() {
     downloadsRoot: managerConfig.downloadsRoot,
   });
   running = handle;
-  return { manager, state, port: handle.server.port };
+  // Bun types the port as optional; it is always set for a listening server,
+  // and every helper below needs a definite number to build a URL from.
+  return { manager, state, port: handle.server.port as number };
 }
 
 const ticketFor = (
