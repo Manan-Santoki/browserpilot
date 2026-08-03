@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { MicIcon, MicOffIcon } from "lucide-react";
+import { AudioLinesIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   GeminiLiveClient,
@@ -466,16 +466,23 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, Props>(function LiveVoice(
 
   return (
     <div className="flex min-w-0 items-center gap-2">
+      {/* Not an icon button. This is a *mode* — you are either talking to the
+          robot or you are not — and it sat beside the dictation mic as an
+          identical grey square distinguished only by its tooltip. A waveform,
+          a word, and the signal colour when live make it a different thing. */}
       <Button
         type="button"
-        size="icon"
+        size="sm"
         variant={active ? "default" : "outline"}
         onClick={() => (active ? stop() : void start())}
         disabled={!runtimeConnected}
-        aria-label={active ? "Stop Live Voice" : "Start Live Voice"}
-        title={active ? "Stop Live Voice" : "Start Live Voice"}
+        aria-pressed={active}
+        aria-label={active ? "Stop talking to the robot" : "Talk to the robot"}
+        title={active ? "Stop talking to the robot" : "Talk to the robot — it answers out loud"}
+        className={active ? "gap-1.5" : "text-muted-foreground gap-1.5"}
       >
-        {active ? <MicOffIcon /> : <MicIcon />}
+        {active ? <SquareIcon /> : <AudioLinesIcon />}
+        Voice
       </Button>
       {active ? (
         <div className="hidden min-w-0 max-w-44 sm:block">

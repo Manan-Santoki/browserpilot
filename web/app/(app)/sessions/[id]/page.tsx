@@ -100,6 +100,7 @@ export default async function SessionPage({
 
         {!finished && canControl ? (
           <div className="flex items-center gap-2">
+            <SharePanel sessionId={session.id} shares={shares} />
             <ConfirmAction
               action={restartBrowser}
               fields={{ sessionId: session.id }}
@@ -144,8 +145,6 @@ export default async function SessionPage({
           browser, but not drive it.
         </div>
       ) : null}
-
-      {canControl ? <SharePanel sessionId={session.id} shares={shares} /> : null}
 
       {session.resumedFromSessionId ? (
         <p className="text-muted-foreground text-sm">

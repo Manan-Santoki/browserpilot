@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -13,10 +13,18 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { StatusLabel } from "@/components/status-lamp";
-import { SendIcon } from "lucide-react";
+import { SendIcon, SettingsIcon } from "lucide-react";
 import { AgentMarkdown } from "@/components/agent-markdown";
 import { BrowserStream, type BrowserStreamHandle } from "@/components/browser-stream";
-import { PushToTalk } from "./push-to-talk";
+import { DictationLanguage, PushToTalk } from "./push-to-talk";
+import { SplitPane } from "./split-pane";
+import { groupTools, ToolCluster } from "./tool-cluster";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   LiveVoice,
   type LiveVoiceHandle,
@@ -53,8 +61,10 @@ export function LiveSession({
   const [ended, setEnded] = useState<{ reason: string | null } | null>(null);
   const [connected, setConnected] = useState(false);
   const [previewOn, setPreviewOn] = useState(true);
-  const [chatOpen, setChatOpen] = useState(true);
   const [draft, setDraft] = useState("");
+  // Owned here because the picker now lives in the composer's overflow menu
+  // while the microphone that uses it sits on the composer itself.
+  const [dictationLang, setDictationLang] = useState(language || "auto");
 
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
@@ -250,8 +260,18 @@ export function LiveSession({
     };
   }, [sessionId, runtimeHttpUrl, append, reconnectNonce]);
 
+  /**
+   * Follow the conversation, unless the person has scrolled away from it.
+   *
+   * Jumping to the bottom on every event yanks the page out from under anyone
+   * reading back through what the robot did — which is exactly when a long
+   * session produces the most events.
+   */
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+    const log = logRef.current;
+    if (!log) return;
+    const distanceFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+    if (distanceFromBottom < 120) log.scrollTo({ top: log.scrollHeight });
   }, [items]);
 
   const send = (event: React.FormEvent) => {
@@ -352,12 +372,24 @@ export function LiveSession({
     [sessionId],
   );
 
-  // Identity-stable, so resizing does not tear down the observer each render.
+  const viewportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Tell the runtime how large the panel is, once the dragging stops.
+   *
+   * Identity-stable, so resizing does not tear down the observer each render —
+   * and debounced, because every distinct width costs a fresh full-resolution
+   * screenshot on the far end. Streaming a drag straight through would fire
+   * hundreds of round trips for one gesture.
+   */
   const reportSize = useCallback((cssWidth: number, pixelRatio: number) => {
-    const socket = wsRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "viewport", cssWidth, pixelRatio }));
-    }
+    if (viewportTimer.current) clearTimeout(viewportTimer.current);
+    viewportTimer.current = setTimeout(() => {
+      const socket = wsRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "viewport", cssWidth, pixelRatio }));
+      }
+    }, 150);
   }, []);
 
   const togglePreview = (checked?: boolean) => {
@@ -384,16 +416,12 @@ export function LiveSession({
     );
   }
 
-  // The browser is what this page is for, so it takes the room and the chat
-  // gets a column beside it. Below lg they stack, browser first — on a phone
-  // you scroll to the conversation, you do not hunt for the screen.
+  // The browser is what this page is for, so it takes the room by default —
+  // but the split is now the person's to set, and either half can be put away.
   return (
-    <div
-      className={`grid min-h-0 flex-1 items-stretch gap-4 lg:min-h-[480px] ${
-        chatOpen ? "lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem]" : ""
-      }`}
-    >
-      <Card className="order-1 flex min-h-0 flex-col gap-0 overflow-hidden py-0 max-lg:h-auto">
+    <SplitPane
+      browser={
+      <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden py-0 max-lg:h-auto">
         <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
           <span className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
             Browser
@@ -403,15 +431,6 @@ export function LiveSession({
               <Switch checked={previewOn} onCheckedChange={togglePreview} disabled={!connected} />
               Live preview
             </label>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="max-lg:hidden"
-              onClick={() => setChatOpen((open) => !open)}
-              title={chatOpen ? "Give the browser the whole width" : "Show the conversation"}
-            >
-              {chatOpen ? "Widen" : "Show chat"}
-            </Button>
           </div>
         </header>
 
@@ -426,12 +445,9 @@ export function LiveSession({
           }
         />
       </Card>
-
-      <Card
-        className={`order-2 flex min-h-0 flex-col gap-0 overflow-hidden py-0 max-lg:h-[70vh] ${
-          chatOpen ? "" : "lg:hidden"
-        }`}
-      >
+      }
+      chat={
+      <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden py-0 max-lg:h-[70vh]">
         <header className="flex items-center gap-2 border-b px-4 py-2.5">
           <StatusLabel status={connected ? status : "disconnected"} live={connected} />
           {!connected ? (
@@ -458,10 +474,14 @@ export function LiveSession({
             </p>
           ) : null}
 
-          {items.map((item, i) => {
+          {groupTools(items).map((entry, i) => {
+            if (entry.kind === "tools") {
+              return <ToolCluster key={entry.key} lines={entry.lines} />;
+            }
+            const item = entry.item;
             if (item.kind === "you") {
               return (
-                <p key={i} className="text-right">
+                <p key={entry.key} className="text-right">
                   <span className="bg-secondary text-secondary-foreground inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-left">
                     {item.text}
                   </span>
@@ -469,11 +489,11 @@ export function LiveSession({
               );
             }
             if (item.kind === "agent") {
-              return <AgentMarkdown key={i}>{item.text}</AgentMarkdown>;
+              return <AgentMarkdown key={entry.key}>{item.text}</AgentMarkdown>;
             }
             if (item.kind === "voice_user") {
               return (
-                <div key={i} className="text-right">
+                <div key={entry.key} className="text-right">
                   <p className="text-muted-foreground mb-1 text-[10px] tracking-wide uppercase">
                     Voice · {item.inputModality} → {item.outputModality}
                   </p>
@@ -485,7 +505,7 @@ export function LiveSession({
             }
             if (item.kind === "voice_assistant") {
               return (
-                <div key={i} className="border-signal/25 bg-signal/5 rounded-lg border px-3 py-2">
+                <div key={entry.key} className="border-signal/25 bg-signal/5 rounded-lg border px-3 py-2">
                   <p className="text-signal mb-1 text-[10px] tracking-wide uppercase">
                     Gemini Live · {item.inputModality} → {item.outputModality}
                   </p>
@@ -493,19 +513,9 @@ export function LiveSession({
                 </div>
               );
             }
-            if (item.kind === "tool") {
-              // The activity feed is a machine log, so it is set as one — mono,
-              // dim, and visually distinct from the agent's prose above it.
-              return (
-                <p key={i} className="text-muted-foreground/80 font-mono text-xs">
-                  <span className="text-muted-foreground/50 mr-2">›</span>
-                  {item.text}
-                </p>
-              );
-            }
             if (item.kind === "error") {
               return (
-                <p key={i} className="text-destructive">
+                <p key={entry.key} className="text-destructive">
                   {item.text}
                 </p>
               );
@@ -514,7 +524,7 @@ export function LiveSession({
               // Asking for a screenshot and getting a download link back is not
               // an answer, so it is shown — full size is one click away.
               return (
-                <a key={i} href={item.url} target="_blank" rel="noreferrer" className="block">
+                <a key={entry.key} href={item.url} target="_blank" rel="noreferrer" className="block">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={item.url}
@@ -526,7 +536,7 @@ export function LiveSession({
             }
             if (item.kind === "file") {
               return (
-                <p key={i}>
+                <p key={entry.key}>
                   <a
                     href={item.url}
                     className="bg-secondary hover:bg-accent inline-flex items-center gap-2 rounded-md px-3 py-1.5 font-mono text-xs transition-colors"
@@ -543,7 +553,7 @@ export function LiveSession({
                 : undefined;
               return (
                 <div
-                  key={i}
+                  key={entry.key}
                   className="border-signal/40 bg-signal/5 rounded-lg border px-3 py-3"
                 >
                   <p className="text-signal text-xs font-medium tracking-wide uppercase">
@@ -584,7 +594,7 @@ export function LiveSession({
             }
             return (
               <div
-                key={i}
+                key={entry.key}
                 className="border-signal/40 bg-signal/5 rounded-lg border px-3 py-2.5"
               >
                 <p className="text-signal font-medium">
@@ -620,39 +630,28 @@ export function LiveSession({
 
         {readOnly ? (
           <div className="border-muted flex shrink-0 items-center gap-2 border-t px-4 py-3 text-sm text-muted-foreground">
-            Watching{ownerName ? ` ${ownerName}'s` : ""} session — you can&apos;t type, approve, or
-            stop it.
+            {/* One expression, one string: JSX drops the whitespace around a
+                line break next to an expression, which ran the words together. */}
+            {`Watching ${ownerName ? `${ownerName}'s` : "this"} session — you can't type, approve, or stop it.`}
           </div>
         ) : (
-        <form onSubmit={send} className="flex shrink-0 items-center gap-2 border-t p-2.5">
-          <LiveVoice
-            ref={liveVoiceRef}
-            sessionId={sessionId}
-            runtimeConnected={connected}
-            runtimeStatus={status}
-            startBrowserTask={(requestId, instruction) =>
-              sendVoiceCommand({
-                type: "voice_task_start",
-                requestId,
-                text: instruction,
-              })
-            }
-            interruptBrowserTask={(requestId) =>
-              sendVoiceCommand({ type: "agent_interrupt", requestId })
-            }
-            submitChoice={submitVoiceChoice}
-            recordTranscript={recordVoiceTranscript}
-            logTelemetry={logVoiceTelemetry}
-          />
-          <PushToTalk
-            language={language}
-            disabled={!connected}
-            onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))}
-          />
-          <Input
+        <form onSubmit={send} className="shrink-0 space-y-2 border-t p-2.5">
+          {/* The box first, and full width. It had roughly 90px of room
+              between four controls on one line; a sentence you cannot see is
+              a sentence you cannot check before it drives a real application. */}
+          <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter breaks the line. The alternative
+              // makes the common case take two actions.
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+              }
+            }}
             disabled={!connected}
+            rows={2}
             placeholder={
               !connected
                 ? "Not connected"
@@ -660,20 +659,63 @@ export function LiveSession({
                   ? "Working — anything you send now goes next"
                   : "Tell the robot what to do…"
             }
-            className="flex-1"
+            className="max-h-40 min-h-16 resize-none"
           />
-          <Button
-            type="submit"
-            size="icon"
-            aria-label="Send"
-            title="Send"
-            disabled={!connected || !draft.trim()}
-          >
-            <SendIcon />
-          </Button>
+
+          <div className="flex items-center gap-2">
+            <LiveVoice
+              ref={liveVoiceRef}
+              sessionId={sessionId}
+              runtimeConnected={connected}
+              runtimeStatus={status}
+              startBrowserTask={(requestId, instruction) =>
+                sendVoiceCommand({
+                  type: "voice_task_start",
+                  requestId,
+                  text: instruction,
+                })
+              }
+              interruptBrowserTask={(requestId) =>
+                sendVoiceCommand({ type: "agent_interrupt", requestId })
+              }
+              submitChoice={submitVoiceChoice}
+              recordTranscript={recordVoiceTranscript}
+              logTelemetry={logVoiceTelemetry}
+            />
+            <PushToTalk
+              language={dictationLang}
+              disabled={!connected}
+              onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))}
+            />
+
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Composer settings"
+                title="Composer settings"
+                className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <SettingsIcon className="size-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="p-2">
+                <DropdownMenuLabel className="px-0">Dictation language</DropdownMenuLabel>
+                <DictationLanguage lang={dictationLang} setLang={setDictationLang} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Button
+              type="submit"
+              size="sm"
+              className="ml-auto"
+              disabled={!connected || !draft.trim()}
+            >
+              <SendIcon />
+              Send
+            </Button>
+          </div>
         </form>
         )}
       </Card>
-    </div>
+      }
+    />
   );
 }
