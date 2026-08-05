@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { robotSessions } from "@browserpilot/db";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/session";
+import { canViewSession } from "@/lib/session-access";
 
 /**
  * Why a session stopped. The live view asks for this when its socket closes,
@@ -27,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .limit(1);
 
   if (!session) return NextResponse.json({ error: "No such session" }, { status: 404 });
-  if (user.role !== "ADMIN" && session.userId !== user.id) {
+  if (!(await canViewSession(user, id))) {
     return NextResponse.json({ error: "Not your session" }, { status: 403 });
   }
 

@@ -46,14 +46,27 @@ function start() {
     store,
     objects: async () => createLocalStore(managerConfig.downloadsRoot),
     storageEnv: {},
+    providerEnv: {},
     downloadsRoot: managerConfig.downloadsRoot,
+    jobModeEnabled: true,
   });
   running = handle;
   return { manager, state, port: handle.server.port };
 }
 
-const ticketFor = (sessionId: string, userId: string, role: "ADMIN" | "USER" = "USER") =>
-  mintTicket({ sessionId, userId, role }, TICKET_SECRET);
+/**
+ * A ticket for an ordinary person who is allowed to work.
+ *
+ * `session.start` is granted by default because that is the case nearly every
+ * test is about; the tests that care about *not* having it pass `[]` and say
+ * so. The console mints the same shape from the account's own permissions.
+ */
+const ticketFor = (
+  sessionId: string,
+  userId: string,
+  role: "ADMIN" | "USER" = "USER",
+  perms: string[] = ["session.start"],
+) => mintTicket({ sessionId, userId, role, perms }, TICKET_SECRET);
 
 describe("authentication", () => {
   test("health is the only route reachable without a ticket", async () => {
@@ -86,6 +99,7 @@ describe("authentication", () => {
     });
     expect(res.status).toBe(401);
   });
+
 });
 
 describe("session routes", () => {
@@ -341,7 +355,75 @@ describe("model selection", () => {
 
     expect(res.status).toBe(200);
     const { id } = (await res.json()) as { id: string };
+    expect(manager.get(id)?.model).toBe("claude-sonnet-5");
     await manager.stop(id);
+  });
+
+  test("a model the provider no longer offers falls back rather than 404ing later", async () => {
+    // The picker is built from the catalogue, but a tab left open since before
+    // an admin edited it still posts the old id. Sending it onward would fail
+    // on the session's first model call, long after this request returned 200.
+    const { port, manager } = start();
+    const ticket = await ticketFor("pending", fx.userId);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({ siteProfileId: fx.siteId, model: "retired-model" }),
+    });
+
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    expect(manager.get(id)?.model).not.toBe("retired-model");
+    await manager.stop(id);
+  });
+});
+
+describe("permission to start a session", () => {
+  test("a person without session.start is refused before a browser is launched", async () => {
+    // The expensive half of starting a session is Chromium. Refusing at the
+    // door rather than after the launch is the difference between a 403 and
+    // 400 MB of wasted memory.
+    const { port, state } = start();
+    const ticket = await ticketFor("pending", fx.userId, "USER", []);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({ siteProfileId: fx.siteId }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(state.browserLaunches).toBe(0);
+  });
+
+  test("an administrator needs no permission row for it", async () => {
+    // The role stays the coarse switch; permissions only refine a USER.
+    const { port, manager } = start();
+    const ticket = await ticketFor("pending", fx.userId, "ADMIN", []);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+      body: JSON.stringify({ siteProfileId: fx.siteId }),
+    });
+
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    await manager.stop(id);
+  });
+});
+
+describe("the provider status route", () => {
+  test("is admin-only — it names the endpoint a deployment talks to", async () => {
+    const { port } = start();
+    const ticket = await ticketFor("pending", fx.userId);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/provider`, {
+      headers: { authorization: `Bearer ${ticket}` },
+    });
+
+    expect(res.status).toBe(403);
   });
 });
 

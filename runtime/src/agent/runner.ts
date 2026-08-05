@@ -1,5 +1,3 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 import {
   createSdkMcpServer,
   query,
@@ -11,26 +9,49 @@ import {
 import { z } from "zod/v4";
 import { classifyToolUse } from "./policy";
 import { buildSystemPrompt } from "./prompt";
+import { playwrightMcpCliPath } from "./mcp-path";
+import {
+  IMAGE_EXTENSIONS,
+  normalizeToolInput,
+  shortToolName,
+  summarize,
+} from "./tool-display";
+export { playwrightMcpCliPath } from "./mcp-path";
 import {
   sessionFileUrl,
   type ChoiceOption,
   type RobotEvent,
 } from "../session/events";
 import type { TargetSite } from "../store";
+import type { WireFormat } from "@browserpilot/core";
+import type { ApplicationInventory, JobAnswerType, SubmissionEvidence } from "@browserpilot/core";
+
+export type JobAgentHandlers = {
+  applicationId: string;
+  systemPrompt: string;
+  lookupCandidate: (fields: string[]) => Promise<Record<string, string>>;
+  lookupSavedAnswer: (question: { label: string; answerType: JobAnswerType; options: string[] }) => Promise<string | null>;
+  getPortalAccount: () => Promise<{ username: string; password: string }>;
+  confirmPortalAccount: (verified: boolean) => Promise<void>;
+  resetPortalAccount: () => Promise<{ username: string; password: string }>;
+  waitForGmailVerification: (afterIso: string) => Promise<{ code?: string; link?: string }>;
+  saveAnswer: (question: { label: string; answerType: JobAnswerType; options: string[] }, value: unknown) => Promise<string>;
+  getApplicationSchema: (input: { boardToken?: string }) => Promise<Record<string, unknown>>;
+  getApplicationDocuments: () => Promise<{ resume: string; coverLetter?: string }>;
+  getCoverLetterContext: () => Promise<{ profile: Record<string, unknown>; resumeText: string }>;
+  generateCoverLetter: (content: string) => Promise<string>;
+  discoverJob: (identity: { externalJobId: string; company?: string; roleTitle?: string; location?: string }) => Promise<{ duplicateOf?: string }>;
+  prepareSubmission: (
+    inventory: ApplicationInventory,
+    context: { manualTakeoverCompleted: boolean },
+  ) => Promise<{ ok: boolean; reasons?: string[] }>;
+  recordSubmission: (evidence: SubmissionEvidence) => Promise<{ ok: boolean; reason?: string }>;
+  recordFailure: (reason: string) => Promise<void>;
+  recordAttention: (reason: string) => Promise<void>;
+  resolvePlaceholder: (placeholder: import("@browserpilot/core").JobPlaceholder) => Promise<unknown>;
+};
 
 export type QueryFn = (params: { prompt: AsyncIterable<never>; options?: Options }) => Query;
-
-/**
- * Absolute path to the Playwright MCP CLI inside our own node_modules.
- *
- * Resolving it ourselves — rather than shelling out to `npx @playwright/mcp` —
- * keeps session startup offline and deterministic. On a WSL host `npx` can even
- * resolve to the Windows binary, which cannot read the Linux working directory.
- */
-export function playwrightMcpCliPath(): string {
-  const require = createRequire(import.meta.url);
-  return join(dirname(require.resolve("@playwright/mcp/package.json")), "cli.js");
-}
 
 export type StartAgentOptions = {
   cdpEndpoint: string;
@@ -38,6 +59,22 @@ export type StartAgentOptions = {
   site: TargetSite;
   model: string;
   env: Record<string, string>;
+  /**
+   * Which API this model speaks, and whether it can read an image.
+   *
+   * Both are properties of the model rather than the deployment, and both are
+   * load-bearing: the format decides how a screenshot reaches the model at all,
+   * and sending an image to one that cannot read it fails the whole turn with a
+   * 400 rather than degrading.
+   */
+  format?: WireFormat;
+  vision?: boolean;
+  /** Absent means the provider's own API. Used by the AI SDK engine. */
+  baseUrl?: string;
+  /** Auth headers, already shaped for this provider's credential kind. */
+  headers?: Record<string, string>;
+  /** Present only for an owner-isolated public job application. */
+  job?: JobAgentHandlers;
   /** Node binary used to run the MCP server. Override when it isn't on PATH. */
   nodeBin?: string;
   /** Named in the URLs the agent's screenshots are served from. */
@@ -55,12 +92,31 @@ export type StartAgentOptions = {
 
 export type StartAgentDeps = {
   queryFn?: QueryFn;
+  /**
+   * Which loop runs this session.
+   *
+   * The Agent SDK path is the one that has driven every session so far and
+   * remains the default; the AI SDK path is what reaches models served over
+   * OpenAI's format. They implement the same `AgentRunner`, so nothing above
+   * here can tell them apart — which is exactly what makes switching back a
+   * matter of one environment variable rather than a revert.
+   */
+  engine?: AgentEngine;
 };
+
+export type AgentEngine = "agent-sdk" | "sdk";
+
+/** The engine this deployment runs, unless a caller says otherwise. */
+export function engineFrom(env: Record<string, string | undefined>): AgentEngine {
+  return env.BP_AGENT_ENGINE?.trim() === "sdk" ? "sdk" : "agent-sdk";
+}
 
 export type AgentRunner = {
   send(text: string, voiceTaskId?: string): void;
   approve(requestId: string, approved: boolean): void;
   choose(requestId: string, value: string): void;
+  answerJobQuestion?(requestId: string, value: string | number | boolean | string[]): void;
+  resolveTakeover?(requestId: string, enabled: boolean): void;
   /** Stop the current model turn while keeping the Claude session reusable. */
   interrupt(): Promise<void>;
   /** Block follow-up browser calls as soon as Chromium reports a download. */
@@ -137,39 +193,6 @@ function subprocessEnv(provider: Record<string, string>): Record<string, string>
   return { ...inherited, ...provider };
 }
 
-function shortToolName(name: string): string {
-  const [prefix, _server, ...toolName] = name.split("__");
-  return prefix === "mcp" && toolName.length > 0 ? toolName.join("__") : name;
-}
-
-/**
- * Adjust what a tool was asked to do before it does it.
- *
- * Playwright MCP hands a screenshot back as an image only when no filename was
- * given; with one it writes the file into its own output directory and returns
- * a path instead. That directory belongs to the MCP process — nobody on our
- * side can reach it — and the picture reaches neither the person who asked for
- * it nor the model that took it, which then describes the page from memory.
- * Dropping the filename is what makes a screenshot an actual screenshot.
- */
-function normalizeToolInput(
-  toolName: string,
-  input: Record<string, unknown>,
-): Record<string, unknown> {
-  if (shortToolName(toolName) !== "browser_take_screenshot" || !("filename" in input)) {
-    return input;
-  }
-  const { filename: _dropped, ...rest } = input;
-  return rest;
-}
-
-/** Extensions for the image types the browser tools can return. */
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/webp": "webp",
-};
-
 type ContentBlock = { type?: string; content?: unknown; source?: unknown };
 
 /** Content blocks of a message, whether it carries prose or structured parts. */
@@ -178,46 +201,19 @@ function blocksOf(message: unknown): ContentBlock[] {
   return Array.isArray(content) ? (content as ContentBlock[]) : [];
 }
 
-/**
- * A one-line description of what a tool call will actually do.
- *
- * This is the entire basis on which someone approves or denies, so it has to
- * carry the specifics. An approval card reading only "browser_evaluate" asks
- * the user to vouch for code they cannot see, which teaches them to approve
- * reflexively — worse than not asking at all.
- */
-function summarize(toolName: string, input: Record<string, unknown>): string {
-  const short = shortToolName(toolName);
-
-  // Arbitrary code: show it, trimmed to one readable line.
-  const code = ["function", "fn", "expression", "script", "pageFunction"]
-    .map((key) => input[key])
-    .find((value): value is string => typeof value === "string");
-  if (code) {
-    const flattened = code.replace(/\s+/g, " ").trim();
-    return `${short}: ${flattened.length > 160 ? `${flattened.slice(0, 157)}…` : flattened}`;
-  }
-
-  const url = typeof input.url === "string" ? input.url : undefined;
-  if (url) return `${short}: ${url}`;
-
-  const target = typeof input.element === "string" ? input.element : undefined;
-  const text = typeof input.text === "string" ? input.text : undefined;
-  if (target && text) return `${short}: ${target} — "${text.slice(0, 60)}"`;
-  if (target) return `${short}: ${target}`;
-
-  // Anything else: show whatever scalar arguments it carries.
-  const scalars = Object.entries(input)
-    .filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
-    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
-    .slice(0, 3);
-  return scalars.length > 0 ? `${short}: ${scalars.join(", ")}` : short;
-}
-
 export async function startAgent(
   opts: StartAgentOptions,
   deps: StartAgentDeps = {},
 ): Promise<AgentRunner> {
+  const engine = opts.job ? "sdk" : (deps.engine ?? engineFrom(process.env));
+  if (engine === "sdk") {
+    // Imported here rather than at the top so a deployment on the old engine
+    // never loads the new one's dependencies — including the MCP client, which
+    // spawns a subprocess the moment it is constructed.
+    const { startAiSdkAgent } = await import("./engine/loop");
+    return startAiSdkAgent(opts);
+  }
+
   const queryFn = deps.queryFn ?? (query as unknown as QueryFn);
   const input = createInputStream();
   const approvals = new Map<string, (approved: boolean) => void>();
@@ -555,6 +551,8 @@ export async function startAgent(
       choices.delete(requestId);
       pending.resolve(selected);
     },
+    answerJobQuestion() {},
+    resolveTakeover() {},
     async interrupt() {
       interruptedByUser = true;
       approvals.forEach((resolve) => resolve(false));

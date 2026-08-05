@@ -8,20 +8,31 @@
     "start": "bun run src/server.ts",
     "test": "bun test",
     "check:provider": "bun run scripts/check-provider.ts",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "check:engine": "bun run scripts/check-engine.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.27",
+    "@ai-sdk/mcp": "^2.0.22",
+    "@ai-sdk/openai-compatible": "^3.0.20",
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
-    "@playwright/mcp": "^0.0.78",
-    "jose": "^6.2.4",
-    "playwright": "^1.62.0",
-    "zod": "^4.3.6",
-    "@browserpilot/db": "workspace:*",
     "@browserpilot/core": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "@browserpilot/db": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@playwright/mcp": "^0.0.78",
+    "ai": "^7.0.47",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.4",
+    "mammoth": "^1.12.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.2.108",
+    "playwright": "^1.62.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/jszip": "^3.4.1",
+    "jszip": "^3.10.1",
     "typescript": "^5.9.0"
   }
 }

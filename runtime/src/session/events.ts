@@ -48,6 +48,32 @@ export type RobotEvent = (
   | { type: "screenshot"; filename: string; url: string }
   /** Whether frames are flowing, so a reconnecting client's toggle tells the truth. */
   | { type: "preview_state"; enabled: boolean }
+  | {
+      type: "job_question";
+      requestId: string;
+      applicationId: string;
+      question: string;
+      answerType: "text" | "boolean" | "number" | "date" | "single_choice" | "multi_choice";
+      options?: string[];
+    }
+  | {
+      type: "manual_takeover";
+      requestId: string;
+      applicationId: string;
+      reason: string;
+      active: boolean;
+    }
+  | {
+      type: "application_status";
+      applicationId: string;
+      status: "queued" | "running" | "needs_attention" | "applied" | "not_applied" | "failed" | "cancelled";
+      detail?: string;
+    }
+  | {
+      type: "notification_status";
+      applicationId: string;
+      status: "pending" | "sending" | "sent" | "failed";
+    }
   | { type: "error"; message: string }
   | {
       type: "voice_command_result";
@@ -78,6 +104,8 @@ export type ClientCommand =
   | { type: "agent_interrupt"; requestId: string; replacementText?: string }
   | { type: "approval"; requestId: string; approved: boolean }
   | { type: "choice"; requestId: string; value: string }
+  | { type: "job_answer"; requestId: string; value: string | number | boolean | string[] }
+  | { type: "takeover"; requestId: string; enabled: boolean }
   | { type: "preview"; enabled: boolean }
   // How large the viewer is showing the stream, so the sharp frame is taken at
   // the resolution it will actually be displayed at and no larger.

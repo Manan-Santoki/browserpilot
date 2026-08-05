@@ -15,6 +15,7 @@
     "check:provider": "cd runtime && bun run check:provider",
     "db:generate": "cd db && bunx drizzle-kit generate",
     "db:migrate": "cd db && bunx drizzle-kit migrate",
-    "dev:mobile": "cd mobile && bun run start"
+    "dev:mobile": "cd mobile && bun run start",
+    "check:engine": "cd runtime && bun run check:engine"
   }
 }

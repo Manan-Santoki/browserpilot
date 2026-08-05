@@ -1,0 +1,1 @@
+ALTER TYPE "public"."session_kind" ADD VALUE 'job';

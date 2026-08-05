@@ -16,7 +16,10 @@ function ticketSecret(): string {
  * it travels in a URL, where it can end up in logs.
  */
 export async function ticketFor(user: CurrentUser, sessionId: string): Promise<string> {
-  return mintTicket({ sessionId, userId: user.id, role: user.role }, ticketSecret());
+  return mintTicket(
+    { sessionId, userId: user.id, role: user.role, perms: user.perms },
+    ticketSecret(),
+  );
 }
 
 export type RuntimeSession = {
@@ -98,6 +101,32 @@ export function runtimeStorageStatus(user: CurrentUser) {
   return call<StorageStatus>(user, "/api/storage");
 }
 
+export type ProviderStatus = {
+  configured: boolean;
+  format?: "anthropic" | "openai";
+  /** Named rather than blank when it is Anthropic's own API. */
+  endpoint?: string;
+  credentialKind?: "oauth" | "apiKey" | "authToken";
+  models?: Array<{ value: string; label: string; vision: boolean; format?: "anthropic" | "openai" }>;
+  /** Which model was probed. Absent when nothing was configured to probe. */
+  model?: string;
+  /** Proven with a one-token request, not asserted. */
+  reachable?: boolean;
+  /** The provider answered but is out of quota — still correctly wired. */
+  rateLimited?: boolean;
+  latencyMs?: number;
+  error?: string;
+};
+
+/**
+ * What the runtime would use for the next session, checked against the
+ * provider. `model` probes one entry of the catalogue rather than the default.
+ */
+export function runtimeProviderStatus(user: CurrentUser, model?: string) {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  return call<ProviderStatus>(user, `/api/provider${query}`);
+}
+
 /** Open a browser for the person to sign in to a site themselves. */
 export function startRuntimeLogin(user: CurrentUser, siteProfileId: string) {
   return call<{ id: string }>(user, "/api/logins", {
@@ -149,4 +178,74 @@ export function runtimeWsUrl(sessionId: string, ticket: string): string {
 
 export function runtimeHttpUrl(): string {
   return RUNTIME_URL;
+}
+
+/** Upload a private candidate document without routing its bytes through the database. */
+export async function uploadJobDocument(
+  user: CurrentUser,
+  documentId: string,
+  file: File,
+): Promise<{ ok: true; data: { key: string; filename: string; size: number; contentType: string; encryptionAad: string; extractedTextEncrypted: string } } | { ok: false; error: string }> {
+  const ticket = await ticketFor(user, "pending");
+  const form = new FormData();
+  form.set("documentId", documentId);
+  form.set("file", file);
+  try {
+    const response = await fetch(`${RUNTIME_URL}/api/job-documents`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}` },
+      body: form,
+      cache: "no-store",
+    });
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) return { ok: false, error: String(body.error ?? "Upload failed") };
+    return { ok: true, data: body as { key: string; filename: string; size: number; contentType: string; encryptionAad: string; extractedTextEncrypted: string } };
+  } catch (error) {
+    return { ok: false, error: `The browser service is unreachable (${(error as Error).message})` };
+  }
+}
+
+export async function fetchJobDocument(user: CurrentUser, documentId: string): Promise<Response> {
+  const ticket = await ticketFor(user, "pending");
+  return fetch(`${RUNTIME_URL}/api/job-documents/${documentId}`, {
+    headers: { authorization: `Bearer ${ticket}` },
+    cache: "no-store",
+  });
+}
+
+export async function deleteJobDocument(user: CurrentUser, documentId: string): Promise<boolean> {
+  const ticket = await ticketFor(user, "pending");
+  const response = await fetch(`${RUNTIME_URL}/api/job-documents/${documentId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${ticket}` },
+    cache: "no-store",
+  }).catch(() => null);
+  return Boolean(response?.ok);
+}
+
+export async function sendJobAnswer(
+  user: CurrentUser,
+  sessionId: string,
+  requestId: string,
+  value: string | number | boolean | string[],
+): Promise<boolean> {
+  const ticket = await ticketFor(user, sessionId);
+  const response = await fetch(`${RUNTIME_URL}/api/sessions/${sessionId}/job-answer`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+    body: JSON.stringify({ requestId, value }),
+    cache: "no-store",
+  }).catch(() => null);
+  return Boolean(response?.ok);
+}
+
+export async function finishJobTakeover(user: CurrentUser, sessionId: string, requestId: string): Promise<boolean> {
+  const ticket = await ticketFor(user, sessionId);
+  const response = await fetch(`${RUNTIME_URL}/api/sessions/${sessionId}/takeover`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+    body: JSON.stringify({ requestId, enabled: true }),
+    cache: "no-store",
+  }).catch(() => null);
+  return Boolean(response?.ok);
 }

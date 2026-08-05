@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { robotSessions } from "@browserpilot/db";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/session";
+import { canViewSession } from "@/lib/session-access";
 import { loadTranscript } from "@/lib/transcript";
 
 type VoiceTranscriptBody = {
@@ -34,7 +35,7 @@ async function authorizeSession(id: string) {
   if (!session) {
     return { error: NextResponse.json({ error: "No such session" }, { status: 404 }) };
   }
-  if (user.role !== "ADMIN" && session.userId !== user.id) {
+  if (!(await canViewSession(user, id))) {
     return { error: NextResponse.json({ error: "Not your session" }, { status: 403 }) };
   }
   return { user };

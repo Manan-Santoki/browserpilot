@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -26,6 +27,41 @@ const LANGUAGES = [
 ];
 
 /**
+ * Which language dictation transcribes.
+ *
+ * It lives apart from the mic because it only governs *this* control, and
+ * sitting between the two microphone buttons in the composer it read as
+ * governing both. The composer keeps it in its overflow menu.
+ */
+export function DictationLanguage({
+  lang,
+  setLang,
+}: {
+  lang: string;
+  setLang: (value: string) => void;
+}) {
+  return (
+      <Select
+        value={lang}
+        onValueChange={(v) => setLang(v ?? "auto")}
+        items={LANGUAGES}
+      >
+        <SelectTrigger size="sm" className="w-[104px]" aria-label="Speech language">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {LANGUAGES.map((l) => (
+            <SelectItem key={l.value} value={l.value}>
+              {l.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+  );
+}
+
+/**
  * Push-to-talk. The transcript lands in the composer for the user to read and
  * edit before sending — it is never dispatched to the agent automatically,
  * because a misheard word here becomes a click in a real application.
@@ -34,7 +70,7 @@ export function PushToTalk({ language, disabled, onTranscript }: Props) {
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lang, setLang] = useState(language || "auto");
+  const lang = language || "auto";
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -97,41 +133,34 @@ export function PushToTalk({ language, disabled, onTranscript }: Props) {
 
   return (
     <div className="flex items-center gap-2">
-      <Button
-        type="button"
-        variant={recording ? "destructive" : "outline"}
-        size="icon"
-        onClick={recording ? stop : start}
-        disabled={disabled || busy}
-        aria-label={recording ? "Stop recording" : "Start recording"}
-        title={recording ? "Stop and transcribe" : "Tap to record, tap again to stop"}
-        className={recording ? "animate-pulse" : undefined}
-      >
-        {busy ? (
-          <Loader2Icon className="animate-spin" />
-        ) : recording ? (
-          <SquareIcon />
-        ) : (
-          <MicIcon />
-        )}
-      </Button>
-
-      <Select
-        value={lang}
-        onValueChange={(v) => setLang(v ?? "auto")}
-        items={LANGUAGES}
-      >
-        <SelectTrigger size="sm" className="w-[104px]" aria-label="Speech language">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {LANGUAGES.map((l) => (
-            <SelectItem key={l.value} value={l.value}>
-              {l.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant={recording ? "destructive" : "outline"}
+              size="icon"
+              onClick={recording ? stop : start}
+              disabled={disabled || busy}
+              aria-label={recording ? "Stop recording" : "Dictate a message"}
+              className={recording ? "animate-pulse" : undefined}
+            >
+              {busy ? (
+                <Loader2Icon className="animate-spin" />
+              ) : recording ? (
+                <SquareIcon />
+              ) : (
+                <MicIcon />
+              )}
+            </Button>
+          }
+        />
+        <TooltipContent>
+          {recording
+            ? "Stop and transcribe"
+            : "Dictate a message — the words go into the box for you to check"}
+        </TooltipContent>
+      </Tooltip>
 
       {error ? (
         <span role="alert" className="text-destructive text-xs">

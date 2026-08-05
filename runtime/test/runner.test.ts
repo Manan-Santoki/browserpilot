@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildSystemPrompt } from "../src/agent/prompt";
-import { startAgent, type QueryFn } from "../src/agent/runner";
+import { engineFrom, startAgent, type QueryFn } from "../src/agent/runner";
 import type { RobotEvent } from "../src/session/events";
 
 /**
@@ -135,7 +135,7 @@ describe("buildSystemPrompt", () => {
 describe("startAgent", () => {
   test("wires Playwright plus the BrowserPilot choice tool, and no host tools", async () => {
     const fake = fakeQuery();
-    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn, engine: "agent-sdk" });
 
     const mcp = fake.captured.options!.mcpServers as Record<
       string,
@@ -166,7 +166,7 @@ describe("startAgent", () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-ambient";
     try {
       const fake = fakeQuery();
-      const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+      const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn, engine: "agent-sdk" });
       const env = fake.captured.options!.env as Record<string, string>;
 
       expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("t");
@@ -197,7 +197,7 @@ describe("startAgent", () => {
 
     try {
       const fake = fakeQuery();
-      const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+      const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn, engine: "agent-sdk" });
       const env = fake.captured.options!.env as Record<string, string>;
 
       for (const key of Object.keys(ambient)) expect(env[key]).toBeUndefined();
@@ -222,7 +222,7 @@ describe("startAgent", () => {
         env: { ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go", ANTHROPIC_AUTH_TOKEN: "sk-x" },
         onEvent: () => {},
       },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
     const env = fake.captured.options!.env as Record<string, string>;
 
@@ -238,7 +238,7 @@ describe("startAgent", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     fake.push(assistantText("Opening Purchase Orders"));
@@ -253,7 +253,7 @@ describe("startAgent", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     fake.push(assistantToolUse("mcp__playwright__browser_click", { element: "New PO button" }));
@@ -270,7 +270,7 @@ describe("startAgent", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     const canUseTool = fake.captured.options!.canUseTool!;
@@ -290,7 +290,7 @@ describe("startAgent", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     const result = await fake.captured.options!.canUseTool!(
@@ -308,7 +308,7 @@ describe("startAgent", () => {
     const fake = fakeQuery();
     const runner = await startAgent(
       { ...OPTS, onEvent: () => {} },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     runner.downloadDetected("order.pdf");
@@ -345,7 +345,7 @@ describe("startAgent", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     const canUseTool = fake.captured.options!.canUseTool!;
@@ -375,7 +375,7 @@ describe("startAgent", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     const canUseTool = fake.captured.options!.canUseTool!;
@@ -399,7 +399,7 @@ describe("startAgent", () => {
 
   test("send() forwards the user's text to the SDK input stream", async () => {
     const fake = fakeQuery();
-    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn, engine: "agent-sdk" });
 
     runner.send("create a PO for KEI");
     const iterator = (fake.captured.prompt as AsyncIterable<{ message: { content: string } }>)[
@@ -444,7 +444,7 @@ describe("screenshots", () => {
         },
         onEvent: (e) => events.push(e),
       },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     fake.push(toolResultImage(PIXEL));
@@ -470,7 +470,7 @@ describe("screenshots", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     fake.push(toolResultImage(PIXEL));
@@ -488,7 +488,7 @@ describe("screenshots", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     fake.push({
@@ -508,7 +508,7 @@ describe("screenshots", () => {
     // directory and hands back a path — the picture reaches neither the user
     // nor the model, which then describes the page from an older snapshot.
     const fake = fakeQuery();
-    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn, engine: "agent-sdk" });
 
     const canUseTool = fake.captured.options!.canUseTool!;
     const result = await canUseTool(
@@ -524,7 +524,7 @@ describe("screenshots", () => {
 
   test("other tools keep every argument they were given", async () => {
     const fake = fakeQuery();
-    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn });
+    const runner = await startAgent({ ...OPTS, onEvent: () => {} }, { queryFn: fake.queryFn, engine: "agent-sdk" });
 
     const canUseTool = fake.captured.options!.canUseTool!;
     const input = { element: "Save", filename: "not-a-screenshot.png" };
@@ -542,7 +542,7 @@ describe("approval summaries", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     // It no longer asks for approval...
@@ -583,7 +583,7 @@ describe("approval summaries", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     fake.push({
@@ -614,7 +614,7 @@ describe("approval summaries", () => {
     const events: RobotEvent[] = [];
     const runner = await startAgent(
       { ...OPTS, onEvent: (e) => events.push(e) },
-      { queryFn: fake.queryFn },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
     );
 
     const canUseTool = fake.captured.options!.canUseTool!;
@@ -630,6 +630,35 @@ describe("approval summaries", () => {
     expect(request.summary).toContain("Delete purchase order");
 
     runner.approve(request.requestId, false);
+    await runner.stop();
+  });
+});
+
+describe("choosing an engine", () => {
+  test("BP_AGENT_ENGINE picks the loop, and anything else is the old one", () => {
+    // Read from the environment rather than a constant so a deployment can be
+    // moved back with a restart rather than a revert.
+    expect(engineFrom({ BP_AGENT_ENGINE: "sdk" })).toBe("sdk");
+    expect(engineFrom({ BP_AGENT_ENGINE: "  sdk  " })).toBe("sdk");
+    expect(engineFrom({ BP_AGENT_ENGINE: "agent-sdk" })).toBe("agent-sdk");
+    expect(engineFrom({})).toBe("agent-sdk");
+    // A typo must not silently switch engines.
+    expect(engineFrom({ BP_AGENT_ENGINE: "SDK" })).toBe("agent-sdk");
+    expect(engineFrom({ BP_AGENT_ENGINE: "vercel" })).toBe("agent-sdk");
+  });
+
+  test("an explicit engine beats the environment", async () => {
+    // Without this the suite depends on an ambient variable: with
+    // BP_AGENT_ENGINE=sdk set, every test above that injects a queryFn was
+    // silently running the *other* engine and asserting against a fake that
+    // was never called.
+    const fake = fakeQuery();
+    const runner = await startAgent(
+      { ...OPTS, onEvent: () => {} },
+      { queryFn: fake.queryFn, engine: "agent-sdk" },
+    );
+
+    expect(fake.captured.options).toBeDefined();
     await runner.stop();
   });
 });

@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { hashPassword, verifyPassword } from "../src/password";
 import { generatePairingCode, generateToken, hashToken, tokensMatch } from "../src/tokens";
-import { decryptSecret, encryptSecret } from "../src/secrets";
+import {
+  decryptBinary,
+  decryptSecret,
+  decryptStructured,
+  encryptBinary,
+  encryptSecret,
+  encryptStructured,
+} from "../src/secrets";
 import { mintTicket, verifyTicket } from "../src/tickets";
 
 const MASTER_KEY = "a".repeat(32);
@@ -117,6 +124,28 @@ describe("site secret encryption", () => {
 
   test("malformed input is refused", () => {
     expect(() => decryptSecret("garbage", MASTER_KEY)).toThrow(/malformed/i);
+  });
+});
+
+describe("private job data encryption", () => {
+  test("binary documents round-trip without exposing plaintext", () => {
+    const plaintext = new TextEncoder().encode("private résumé bytes");
+    const sealed = encryptBinary(plaintext, MASTER_KEY, "user-1/document-1");
+    expect(new TextDecoder().decode(sealed)).not.toContain("private résumé bytes");
+    expect(decryptBinary(sealed, MASTER_KEY, "user-1/document-1")).toEqual(plaintext);
+  });
+
+  test("binary documents are bound to their owner and reject tampering", () => {
+    const sealed = encryptBinary(new Uint8Array([1, 2, 3]), MASTER_KEY, "owner-a");
+    expect(() => decryptBinary(sealed, MASTER_KEY, "owner-b")).toThrow();
+    sealed[sealed.length - 1] = sealed[sealed.length - 1]! ^ 1;
+    expect(() => decryptBinary(sealed, MASTER_KEY, "owner-a")).toThrow();
+  });
+
+  test("structured candidate values retain their types", () => {
+    const sealed = encryptStructured({ salary: 120000, relocate: false, locations: ["Remote"] }, MASTER_KEY);
+    expect(decryptStructured<{ salary: number; relocate: boolean; locations: string[] }>(sealed, MASTER_KEY))
+      .toEqual({ salary: 120000, relocate: false, locations: ["Remote"] });
   });
 });
 

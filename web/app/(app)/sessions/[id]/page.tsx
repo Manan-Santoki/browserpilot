@@ -1,17 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { robotSessions, siteProfiles } from "@browserpilot/db";
-import { requireUser } from "@/lib/auth";
+import { robotSessions, siteProfiles, sessionShares, users } from "@browserpilot/db";
+import { can, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { runtimeHttpUrl } from "@/lib/runtime";
 import { loadTranscript } from "@/lib/transcript";
+import { canViewSession } from "@/lib/session-access";
 import { restartBrowser, resumeSession, stopSession } from "../actions";
 import { ConfirmAction } from "@/components/confirm-action";
 import { Button } from "@/components/ui/button";
 import { LiveSession } from "./live";
 import { SessionFiles } from "./files";
 import { TranscriptView } from "./transcript-view";
+import { SharePanel } from "./share";
 
 export default async function SessionPage({
   params,
@@ -42,7 +44,32 @@ export default async function SessionPage({
     .limit(1);
 
   if (!session) notFound();
-  if (user.role !== "ADMIN" && session.userId !== user.id) notFound();
+  if (!(await canViewSession(user, id))) notFound();
+
+  const canControl = user.role === "ADMIN" || session.userId === user.id;
+
+  const [owner] = session.userId === user.id
+    ? []
+    : await db()
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, session.userId))
+        .limit(1);
+
+  // Who this session is shared with, for the owner's share panel.
+  const shares = canControl
+    ? await db()
+        .select({
+          userId: sessionShares.userId,
+          name: users.name,
+          email: users.email,
+          createdAt: sessionShares.createdAt,
+        })
+        .from(sessionShares)
+        .innerJoin(users, eq(users.id, sessionShares.userId))
+        .where(eq(sessionShares.robotSessionId, id))
+        .orderBy(users.name)
+    : [];
 
   const finished = ["stopped", "failed", "interrupted"].includes(session.status);
   const transcript = await loadTranscript(session.id);
@@ -71,8 +98,9 @@ export default async function SessionPage({
           </p>
         </div>
 
-        {!finished ? (
+        {!finished && canControl ? (
           <div className="flex items-center gap-2">
+            <SharePanel sessionId={session.id} shares={shares} />
             <ConfirmAction
               action={restartBrowser}
               fields={{ sessionId: session.id }}
@@ -95,17 +123,28 @@ export default async function SessionPage({
               destructive
             />
           </div>
-        ) : continuation ? (
-          <Link href={`/sessions/${continuation.id}`} className="text-sm font-medium underline">
-            Open continuation
-          </Link>
-        ) : (
-          <form action={resumeSession}>
-            <input type="hidden" name="sessionId" value={session.id} />
-            <Button type="submit">Resume session</Button>
-          </form>
-        )}
+        ) : !finished && canControl === false ? (
+          <p className="text-muted-foreground text-sm">Read-only — you are watching this session.</p>
+        ) : finished && canControl ? (
+          continuation ? (
+            <Link href={`/sessions/${continuation.id}`} className="text-sm font-medium underline">
+              Open continuation
+            </Link>
+          ) : (
+            <form action={resumeSession}>
+              <input type="hidden" name="sessionId" value={session.id} />
+              <Button type="submit">Resume session</Button>
+            </form>
+          )
+        ) : null}
       </div>
+
+      {!canControl && owner ? (
+        <div className="border-signal/40 bg-signal/5 text-foreground/90 rounded-lg border px-4 py-3 text-sm">
+          You are watching {owner.name}&apos;s session. You can read the conversation and watch the
+          browser, but not drive it.
+        </div>
+      ) : null}
 
       {session.resumedFromSessionId ? (
         <p className="text-muted-foreground text-sm">
@@ -147,6 +186,8 @@ export default async function SessionPage({
           runtimeHttpUrl={runtimeHttpUrl()}
           language={user.preferredLanguage}
           initialItems={transcript}
+          readOnly={!canControl}
+          ownerName={!canControl ? (owner?.name ?? "someone else") : undefined}
         />
       )}
     </div>

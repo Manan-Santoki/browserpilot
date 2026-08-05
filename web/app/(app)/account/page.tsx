@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth";
-import { setLanguage } from "./actions";
+import { setLanguage, setPreferredModel } from "./actions";
 import { PasswordForm } from "./password-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { modelsIncluding } from "@/lib/models";
 
 const LANGUAGES = [
   { value: "en", label: "English" },
@@ -19,6 +20,7 @@ const LANGUAGES = [
 
 export default async function AccountPage() {
   const user = await requireUser();
+  const models = await modelsIncluding(user.preferredModel ?? "");
 
   return (
     <div className="mx-auto w-full max-w-6xl max-w-lg space-y-10">
@@ -35,6 +37,42 @@ export default async function AccountPage() {
         </CardHeader>
         <CardContent>
           <PasswordForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Preferred model</CardTitle>
+          <CardDescription>
+            Used for every new session unless you pick a different one at start.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={setPreferredModel} className="flex items-center gap-2">
+            <Select
+              name="model"
+              defaultValue={user.preferredModel ?? ""}
+              items={[
+                { value: "", label: "Use the default (site's choice)" },
+                ...models.map((m) => ({ value: m.value, label: m.label })),
+              ]}
+            >
+              <SelectTrigger className="w-[240px]" aria-label="Preferred model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Use the default</SelectItem>
+                {models.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="submit" variant="outline">
+              Save
+            </Button>
+          </form>
         </CardContent>
       </Card>
 

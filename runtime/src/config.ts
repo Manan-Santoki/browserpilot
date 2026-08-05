@@ -1,4 +1,4 @@
-import { modelCatalogue, type ModelChoice } from "@browserpilot/core";
+import { isJobModeEnabled, modelCatalogue, type ModelChoice } from "@browserpilot/core";
 
 /**
  * How the agent authenticates to whichever Messages API it is pointed at.
@@ -45,6 +45,8 @@ export type RuntimeConfig = {
   /** Used when the database has no `defaultModel` row of its own. */
   defaultModel: string;
   nodeBin: string;
+  /** Internal beta gate. Production defaults to disabled. */
+  jobModeEnabled: boolean;
   provider: AiProvider;
 };
 
@@ -153,31 +155,11 @@ export function loadConfig(env: Record<string, string | undefined>): RuntimeConf
     // deployment does not need a second variable to be usable.
     defaultModel: env.BP_MODEL?.trim() || provider.models[0]?.value || "claude-opus-5",
     nodeBin: env.BP_NODE_BIN?.trim() || "node",
+    jobModeEnabled: isJobModeEnabled(env),
     provider,
   };
 }
 
-/** The environment that points the agent subprocess at this provider. */
-export function providerEnv(config: RuntimeConfig): Record<string, string> {
-  const { baseUrl, credential } = config.provider;
-  const env: Record<string, string> = {};
-
-  if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
-
-  switch (credential.kind) {
-    case "oauth":
-      env.CLAUDE_CODE_OAUTH_TOKEN = credential.value;
-      break;
-    case "apiKey":
-      env.ANTHROPIC_API_KEY = credential.value;
-      break;
-    case "authToken":
-      env.ANTHROPIC_AUTH_TOKEN = credential.value;
-      break;
-  }
-
-  return env;
-}
 
 /** One line describing where the agent's tokens are going. Logged at boot. */
 export function describeProvider(config: RuntimeConfig): string {

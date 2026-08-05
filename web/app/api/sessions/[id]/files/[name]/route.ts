@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { ticketFor, runtimeHttpUrl } from "@/lib/runtime";
 import { isViewable } from "@browserpilot/core";
 import { getCurrentUser } from "@/lib/session";
+import { canViewSession } from "@/lib/session-access";
 
 /**
  * Stream a downloaded file from the runtime.
@@ -30,7 +31,7 @@ export async function GET(
     .limit(1);
 
   if (!session) return NextResponse.json({ error: "No such session" }, { status: 404 });
-  if (user.role !== "ADMIN" && session.userId !== user.id) {
+  if (!(await canViewSession(user, id))) {
     return NextResponse.json({ error: "Not your session" }, { status: 403 });
   }
 

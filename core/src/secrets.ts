@@ -14,6 +14,8 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:
 
 const VERSION = "v1";
 const IV_LENGTH = 12;
+const AUTH_TAG_LENGTH = 16;
+const BINARY_MAGIC = Buffer.from("BPB1", "ascii");
 
 function deriveKey(masterKey: string): Buffer {
   if (masterKey.length < 32) {
@@ -56,4 +58,52 @@ export function decryptSecret(sealed: string, masterKey: string): string {
     decipher.update(Buffer.from(ciphertextPart!, "base64url")),
     decipher.final(),
   ]).toString("utf8");
+}
+
+/**
+ * Seal private documents without first turning them into base64 or text.
+ * Wire format: `BPB1` magic, 12-byte IV, 16-byte GCM tag, then ciphertext.
+ * Optional AAD binds a blob to its owner/document identity.
+ */
+export function encryptBinary(
+  plaintext: Uint8Array,
+  masterKey: string,
+  aad?: string,
+): Uint8Array {
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv("aes-256-gcm", deriveKey(masterKey), iv);
+  if (aad) cipher.setAAD(Buffer.from(aad, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return Buffer.concat([BINARY_MAGIC, iv, cipher.getAuthTag(), ciphertext]);
+}
+
+export function decryptBinary(
+  sealed: Uint8Array,
+  masterKey: string,
+  aad?: string,
+): Uint8Array {
+  const bytes = Buffer.from(sealed);
+  const headerLength = BINARY_MAGIC.length + IV_LENGTH + AUTH_TAG_LENGTH;
+  if (bytes.length < headerLength || !bytes.subarray(0, BINARY_MAGIC.length).equals(BINARY_MAGIC)) {
+    throw new Error("Malformed sealed binary");
+  }
+  const ivStart = BINARY_MAGIC.length;
+  const tagStart = ivStart + IV_LENGTH;
+  const dataStart = tagStart + AUTH_TAG_LENGTH;
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    deriveKey(masterKey),
+    bytes.subarray(ivStart, tagStart),
+  );
+  if (aad) decipher.setAAD(Buffer.from(aad, "utf8"));
+  decipher.setAuthTag(bytes.subarray(tagStart, dataStart));
+  return Buffer.concat([decipher.update(bytes.subarray(dataStart)), decipher.final()]);
+}
+
+export function encryptStructured(value: unknown, masterKey: string): string {
+  return encryptSecret(JSON.stringify(value), masterKey);
+}
+
+export function decryptStructured<T>(sealed: string, masterKey: string): T {
+  return JSON.parse(decryptSecret(sealed, masterKey)) as T;
 }

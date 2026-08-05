@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeProvider, loadConfig, providerEnv } from "../src/config";
+import { describeProvider, loadConfig } from "../src/config";
 
 const base = {
   DATABASE_URL: "postgresql://user:pass@localhost:5432/browserpilot",
@@ -24,6 +24,7 @@ describe("loadConfig", () => {
     expect(cfg.defaultModel).toBe("claude-opus-5");
     expect(cfg.nodeBin).toBe("node");
     expect(cfg.downloadsRoot).toBe("./downloads");
+    expect(cfg.jobModeEnabled).toBe(true);
     expect(cfg.provider.credential).toEqual({ kind: "oauth", value: "oauth-token" });
     expect(cfg.provider.baseUrl).toBeUndefined();
   });
@@ -87,33 +88,10 @@ describe("loadConfig", () => {
     expect(cfg.port).toBe(9000);
     expect(cfg.nodeBin).toBe("/usr/bin/node");
   });
-});
 
-describe("providerEnv", () => {
-  test("maps an oauth credential to the SDK env var", () => {
-    expect(providerEnv(loadConfig(base))).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth-token" });
-  });
-
-  test("maps an api key credential to the SDK env var", () => {
-    const { CLAUDE_CODE_OAUTH_TOKEN: _drop, ...noOauth } = base;
-    expect(providerEnv(loadConfig({ ...noOauth, ANTHROPIC_API_KEY: "sk-ant-xxx" }))).toEqual({
-      ANTHROPIC_API_KEY: "sk-ant-xxx",
-    });
-  });
-
-  test("a gateway ships both the base URL and a bearer token", () => {
-    expect(providerEnv(loadConfig(gateway))).toEqual({
-      ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",
-      ANTHROPIC_AUTH_TOKEN: "sk-gateway",
-    });
-  });
-
-  test("no Anthropic credential leaks alongside a gateway one", () => {
-    // The subscription token is present in the environment but must not be
-    // handed to a third party — nor be a second credential the SDK might pick.
-    const env = providerEnv(loadConfig({ ...gateway, CLAUDE_CODE_OAUTH_TOKEN: "oauth-token" }));
-    expect(env).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
-    expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
+  test("job mode defaults off in production and can be deliberately enabled", () => {
+    expect(loadConfig({ ...base, NODE_ENV: "production" }).jobModeEnabled).toBe(false);
+    expect(loadConfig({ ...base, NODE_ENV: "production", BP_JOB_MODE_ENABLED: "true" }).jobModeEnabled).toBe(true);
   });
 });
 
@@ -127,8 +105,8 @@ describe("gateway providers", () => {
   test("serves the configured catalogue, not Claude", () => {
     const cfg = loadConfig(gateway);
     expect(cfg.provider.models).toEqual([
-      { value: "qwen3.7-plus", label: "Qwen 3.7 Plus" },
-      { value: "minimax-m3", label: "minimax-m3" },
+      { value: "qwen3.7-plus", label: "Qwen 3.7 Plus", vision: true },
+      { value: "minimax-m3", label: "minimax-m3", vision: true },
     ]);
   });
 

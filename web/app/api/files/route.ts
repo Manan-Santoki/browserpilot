@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { desc, eq, inArray } from "drizzle-orm";
 import { robotSessions, sessionEvents, siteProfiles } from "@browserpilot/db";
+import { can } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/session";
 
@@ -18,7 +19,11 @@ export async function GET() {
     })
     .from(robotSessions)
     .leftJoin(siteProfiles, eq(siteProfiles.id, robotSessions.siteProfileId))
-    .where(user.role === "ADMIN" ? undefined : eq(robotSessions.userId, user.id))
+    .where(
+      user.role === "ADMIN" || can(user, "session.view_others")
+        ? undefined
+        : eq(robotSessions.userId, user.id),
+    )
     .orderBy(desc(robotSessions.startedAt))
     .limit(200);
 

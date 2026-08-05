@@ -7,6 +7,23 @@ import type { ManagerDeps } from "../src/session/manager";
 import type { RobotEvent } from "../src/session/events";
 import type { RobotBrowser } from "../src/browser/chromium";
 import { withTestSettings } from "./support/settings";
+import type { ProviderSettings } from "../src/agent/provider-settings";
+
+/**
+ * A provider offering exactly the models a test names.
+ *
+ * The manager resolves a session's model against the catalogue, so a fake with
+ * a fixed list would quietly rewrite any model a test asked for into the
+ * deployment default — and the assertion would fail somewhere far from the
+ * cause.
+ */
+export function fakeProvider(...models: string[]): ProviderSettings {
+  return {
+    format: "anthropic",
+    credential: { kind: "apiKey", value: "test-key" },
+    models: models.map((value) => ({ value, label: value, vision: true })),
+  };
+}
 
 export const TEST_DATABASE_URL =
   process.env.DATABASE_URL ?? "postgresql://browserpilot:devpassword@127.0.0.1:55432/browserpilot";
@@ -184,6 +201,7 @@ export function fakeDeps(overrides: Partial<ManagerDeps> = {}) {
   const deps: ManagerDeps = {
     store,
     profiles: fakeProfiles(state),
+    resolveProvider: async () => fakeProvider("claude-sonnet-5"),
     objects: async () => createLocalStore("/tmp/bp-test-objects"),
     createInput: async () => ({
       dispatch: async (event) => {

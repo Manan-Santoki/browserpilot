@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
-import { describeProvider, loadConfig, providerEnv } from "./config";
+import { describeProvider, loadConfig } from "./config";
+import { providerEnvVars } from "./agent/provider-settings";
 import { launchRobotBrowser } from "./browser/chromium";
 import { createInputSink } from "./browser/input";
 import { createProfileStore } from "./browser/profiles";
@@ -11,6 +12,8 @@ import { checkProvider, formatCheck } from "./agent/preflight";
 import { SessionManager } from "./session/manager";
 import { createServer } from "./http/routes";
 import { Store } from "./store";
+import { JobWorker } from "./jobs/worker";
+import { NotificationWorker } from "./jobs/notifications";
 
 const config = loadConfig(process.env);
 const store = new Store(config.databaseUrl, config.masterKey, config.defaultModel);
@@ -21,6 +24,8 @@ const orphaned = await store.markOrphansInterrupted();
 if (orphaned > 0) {
   console.log(`Marked ${orphaned} session(s) interrupted after restart.`);
 }
+const interruptedJobs = await store.recoverInterruptedJobs();
+if (interruptedJobs > 0) console.log(`Moved ${interruptedJobs} interrupted job application(s) to Needs attention.`);
 
 // Copies of saved profiles from a previous run are useless — their sessions
 // died with the process — and they are the largest thing on the disk.
@@ -54,11 +59,15 @@ const manager = new SessionManager(
   {
     downloadsRoot: config.downloadsRoot,
     scratchRoot: config.scratchRoot,
-    env: providerEnv(config),
     nodeBin: config.nodeBin,
   },
   {
     store,
+    // Read per session rather than at boot, so an administrator switching
+    // provider in the console takes effect on the next session rather than
+    // the next redeploy. Unlike `objects()` there is nothing expensive to
+    // build from the answer, so there is nothing worth caching.
+    resolveProvider: () => store.providerSettings(providerEnvVars(process.env)),
     profiles,
     now: () => Date.now(),
     launchBrowser: launchRobotBrowser,
@@ -75,18 +84,36 @@ const { server } = createServer(manager, {
   store,
   objects,
   storageEnv: storageEnv(process.env),
+  providerEnv: providerEnvVars(process.env),
   downloadsRoot: config.downloadsRoot,
+  jobModeEnabled: config.jobModeEnabled,
 });
 
 setInterval(() => void manager.sweep().catch(() => {}), 30_000);
+if (config.jobModeEnabled) {
+  const jobWorker = new JobWorker(store, manager);
+  setInterval(() => void jobWorker.tick().catch(() => {}), 3_000);
+  void jobWorker.tick().catch(() => {});
+}
+if (config.jobModeEnabled && process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+  const notificationWorker = new NotificationWorker(
+    store,
+    process.env.GOOGLE_OAUTH_CLIENT_ID,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    (applicationId, status) => manager.publishNotificationStatus(applicationId, status),
+  );
+  setInterval(() => void notificationWorker.tick().catch(() => {}), 5_000);
+  void notificationWorker.tick().catch(() => {});
+}
 
 console.log(`BrowserPilot runtime listening on http://127.0.0.1:${server.port}`);
 console.log(`Targets come from the database — provider: ${describeProvider(config)}`);
+console.log(`Job mode: ${config.jobModeEnabled ? "enabled (internal beta)" : "disabled"}`);
 
 // Reported, not enforced: a provider that is briefly unreachable should not
 // stop a service whose sessions, files and console are all fine. The point is
 // that a misrouted base URL or a token in the wrong header shows up here
 // rather than as an agent that silently never answers.
-void checkProvider(config)
+void checkProvider(config.provider, config.defaultModel)
   .then((check) => console[check.ok ? "log" : "warn"](formatCheck(check)))
   .catch(() => {});

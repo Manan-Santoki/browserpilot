@@ -2,7 +2,6 @@
 
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -14,11 +13,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { saveStorageSettings, type AdminState } from "../actions";
+import { AdminSaveBar, AdminSection } from "../shell";
 
 const initial: AdminState = {};
 
 const DRIVERS = [
-  { value: "s3", label: "An S3 bucket" },
+  { value: "s3", label: "An S3-compatible bucket" },
   { value: "local", label: "This server's disk" },
 ];
 
@@ -38,71 +38,63 @@ export function StorageForm({ current }: { current: Current }) {
 
   return (
     <form action={action} className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Where downloads go</CardTitle>
-          <CardDescription>
-            Files on this server&apos;s disk are lost when it is redeployed. A bucket keeps them.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select
-            name="storageDriver"
-            value={driver}
-            onValueChange={(v) => setDriver(v ?? "s3")}
-            items={DRIVERS}
-          >
-            <SelectTrigger className="w-full" aria-label="Storage">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DRIVERS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
+      <AdminSection
+        title="Where downloads go"
+        description="Files on this server's disk are lost when it is redeployed. A bucket keeps them."
+      >
+        <Select
+          name="storageDriver"
+          value={driver}
+          onValueChange={(v) => setDriver(v ?? "s3")}
+          items={DRIVERS}
+        >
+          <SelectTrigger className="w-full" aria-label="Storage">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DRIVERS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </AdminSection>
 
       {driver === "s3" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Bucket</CardTitle>
-            <CardDescription>
-              Leave the endpoint empty for Amazon S3. Any other provider — MinIO, Cloudflare R2,
-              Backblaze — needs its own.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <AdminSection
+          title="Bucket connection"
+          description="Leave the endpoint empty for Amazon S3. Any other provider — MinIO, Cloudflare R2, Backblaze — needs its own."
+        >
+          <div className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="s3Bucket">Bucket name</Label>
               <Input id="s3Bucket" name="s3Bucket" defaultValue={current.bucket} required />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="s3Endpoint">
-                Endpoint <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Input
-                id="s3Endpoint"
-                name="s3Endpoint"
-                defaultValue={current.endpoint}
-                placeholder="http://browserpilot-minio:9000"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="s3Region">
-                Region <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Input
-                id="s3Region"
-                name="s3Region"
-                defaultValue={current.region}
-                placeholder="us-east-1"
-              />
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="s3Endpoint">
+                  Endpoint <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Input
+                  id="s3Endpoint"
+                  name="s3Endpoint"
+                  defaultValue={current.endpoint}
+                  placeholder="http://browserpilot-minio:9000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="s3Region">
+                  Region <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Input
+                  id="s3Region"
+                  name="s3Region"
+                  defaultValue={current.region}
+                  placeholder="us-east-1"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -137,20 +129,11 @@ export function StorageForm({ current }: { current: Current }) {
                 </span>
               </span>
             </label>
-          </CardContent>
-        </Card>
+          </div>
+        </AdminSection>
       ) : null}
 
-      {state.error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {state.error}
-        </p>
-      ) : null}
-      {state.success ? <p className="text-running text-sm">{state.success}</p> : null}
-
-      <Button type="submit" disabled={pending}>
-        {pending ? "Saving…" : "Save storage"}
-      </Button>
+      <AdminSaveBar pending={pending} label="Save storage" error={state.error} success={state.success} />
     </form>
   );
 }

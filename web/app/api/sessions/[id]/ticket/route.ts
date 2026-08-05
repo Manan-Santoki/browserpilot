@@ -4,6 +4,7 @@ import { robotSessions } from "@browserpilot/db";
 import { db } from "@/lib/db";
 import { ticketFor, runtimeWsUrl } from "@/lib/runtime";
 import { getCurrentUser } from "@/lib/session";
+import { canViewSession } from "@/lib/session-access";
 
 /**
  * Mint a short-lived WebSocket ticket for one session.
@@ -24,7 +25,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .limit(1);
 
   if (!session) return NextResponse.json({ error: "No such session" }, { status: 404 });
-  if (user.role !== "ADMIN" && session.userId !== user.id) {
+  if (!(await canViewSession(user, id))) {
     return NextResponse.json({ error: "Not your session" }, { status: 403 });
   }
 

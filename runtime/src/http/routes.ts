@@ -9,6 +9,15 @@ import type { Store } from "../store";
 import { contentTypeFor } from "@browserpilot/core";
 import { objectKey, type ObjectStore } from "../storage/object-store";
 import { describeStorage, type StorageEnv } from "../storage/settings";
+import {
+  describeProviderSettings,
+  formatForModel,
+  type ProviderEnv,
+} from "../agent/provider-settings";
+import { checkProvider } from "../agent/preflight";
+import { resolveModel } from "@browserpilot/core";
+import { contentTypeFor as jobContentTypeFor } from "@browserpilot/core";
+import { extractJobDocumentText } from "../jobs/documents";
 
 type SocketData = {
   sessionId: string;
@@ -27,8 +36,12 @@ export type ServerOptions = {
   objects: () => Promise<ObjectStore>;
   /** The storage variables this deployment was started with. */
   storageEnv: StorageEnv;
+  /** The provider variables this deployment was started with. */
+  providerEnv: ProviderEnv;
   /** Where per-session download directories live. */
   downloadsRoot: string;
+  /** Whether beta-only job routes may be reached. */
+  jobModeEnabled: boolean;
 };
 
 /**
@@ -54,6 +67,9 @@ const STATUS_FOR: Record<SessionError["code"], number> = {
   login_expired: 409,
   unknown_session: 404,
   not_resumable: 409,
+  // Nothing the caller did wrong, and retrying will not help until an
+  // administrator configures a provider.
+  no_provider: 503,
 };
 
 export function createServer(manager: SessionManager, opts: ServerOptions) {
@@ -82,6 +98,12 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
 
       if (path === "/health") return json({ ok: true });
 
+      const isJobRoute =
+        path === "/api/job-documents" ||
+        path.startsWith("/api/job-documents/") ||
+        /^\/api\/sessions\/[^/]+\/(job-answer|takeover)$/.test(path);
+      if (!opts.jobModeEnabled && isJobRoute) return json({ error: "Not found" }, 404);
+
       const claims = await claimsFor(req, url);
       if (!claims) return json({ error: "A valid ticket is required" }, 401);
 
@@ -93,7 +115,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         // A ticket is scoped to one session; presenting it for another is a
         // privilege-escalation attempt, not a routing mistake.
         if (claims.sessionId !== sessionId) return json({ error: "Ticket is for another session" }, 403);
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
+        if (!(await manager.canView(session, claims.userId, claims.role, claims.perms))) {
           return json({ error: "Not your session" }, 403);
         }
         // Declared in the URL rather than in a message, because the first
@@ -117,6 +139,10 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         };
         if (!body.siteProfileId) return json({ error: "siteProfileId is required" }, 400);
 
+        if (claims.role !== "ADMIN" && !claims.perms?.includes("session.start")) {
+          return json({ error: "You do not have permission to start sessions" }, 403);
+        }
+
         try {
           const id = await manager.create(
             claims.userId,
@@ -131,6 +157,89 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           }
           return json({ error: (error as Error).message }, 500);
         }
+      }
+
+      if (path === "/api/job-documents" && req.method === "POST") {
+        const form = await req.formData().catch(() => null);
+        const file = form?.get("file");
+        const documentId = String(form?.get("documentId") ?? "");
+        if (!(file instanceof File) || !/^[0-9a-f-]{36}$/i.test(documentId)) {
+          return json({ error: "A file and valid documentId are required" }, 400);
+        }
+        if (file.size <= 0 || file.size > 10 * 1024 * 1024) {
+          return json({ error: "Documents must be between 1 byte and 10 MB" }, 400);
+        }
+        const safeName = basename(file.name).replace(/[^a-zA-Z0-9._ -]/g, "_") || "resume.pdf";
+        const allowed = new Set([
+          "application/pdf",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ]);
+        if (!allowed.has(file.type) && !/\.(pdf|docx)$/i.test(safeName)) {
+          return json({ error: "Only PDF and DOCX documents are supported" }, 415);
+        }
+        const staged = join(tmpdir(), `bp-job-${documentId}-${safeName}`);
+        const key = `jobs/${claims.userId}/${documentId}/${safeName}`;
+        try {
+          const plaintext = new Uint8Array(await file.arrayBuffer());
+          const extractedText = await extractJobDocumentText(
+            plaintext,
+            safeName,
+            file.type || jobContentTypeFor(safeName),
+          );
+          const encrypted = opts.store.sealJobDocument(
+            claims.userId,
+            documentId,
+            plaintext,
+          );
+          await Bun.write(staged, encrypted);
+          await (await opts.objects()).put(key, staged, "application/octet-stream");
+          return json({
+            key,
+            filename: safeName,
+            size: file.size,
+            contentType: file.type || jobContentTypeFor(safeName),
+            encryptionAad: `${claims.userId}:${documentId}`,
+            extractedTextEncrypted: opts.store.sealJobExtractedText(extractedText),
+          });
+        } finally {
+          await rm(staged, { force: true }).catch(() => {});
+        }
+      }
+
+      const jobDocumentMatch = /^\/api\/job-documents\/([0-9a-f-]{36})$/.exec(path);
+      if (jobDocumentMatch && req.method === "GET") {
+        const prefix = `jobs/${claims.userId}/${jobDocumentMatch[1]!}/`;
+        const entries = await (await opts.objects()).list(prefix);
+        const found = entries[0];
+        if (!found) return json({ error: "No such document" }, 404);
+        const body = await (await opts.objects()).get(found.key);
+        if (!body) return json({ error: "No such document" }, 404);
+        const sealed = new Uint8Array(await new Response(body).arrayBuffer());
+        let plaintext: Uint8Array;
+        try {
+          plaintext = opts.store.unsealJobDocument(claims.userId, jobDocumentMatch[1]!, sealed);
+        } catch {
+          return json({ error: "The document could not be decrypted" }, 500);
+        }
+        const responseBody = plaintext.buffer.slice(
+          plaintext.byteOffset,
+          plaintext.byteOffset + plaintext.byteLength,
+        ) as ArrayBuffer;
+        return new Response(responseBody, {
+          headers: {
+            "content-type": jobContentTypeFor(basename(found.key)),
+            "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(basename(found.key))}`,
+            "cache-control": "private, no-store",
+          },
+        });
+      }
+
+      if (jobDocumentMatch && req.method === "DELETE") {
+        const prefix = `jobs/${claims.userId}/${jobDocumentMatch[1]!}/`;
+        const objects = await opts.objects();
+        const entries = await objects.list(prefix);
+        await Promise.all(entries.map((entry) => objects.delete(entry.key)));
+        return json({ ok: true, deleted: entries.length });
       }
 
       // Read-only, admin-only: what the runtime resolved storage to, so the
@@ -161,9 +270,44 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         return json({ ...describeStorage(settings), reachable, error });
       }
 
+      // The same shape of answer for the model provider: what the runtime
+      // would use for the *next* session, proven against the provider rather
+      // than described. `?model=` probes one entry of the catalogue; without
+      // it, the deployment default.
+      if (path === "/api/provider" && req.method === "GET") {
+        if (claims.role !== "ADMIN") return json({ error: "Administrators only" }, 403);
+
+        const settings = await opts.store.providerSettings(opts.providerEnv);
+        const described = describeProviderSettings(settings);
+        if (!settings) return json(described);
+
+        const requested = url.searchParams.get("model")?.trim();
+        const model = resolveModel({
+          requested,
+          fallback: (await opts.store.settings()).defaultModel,
+          catalogue: settings.models,
+        });
+        if (!model) return json({ ...described, reachable: false, error: "No model to check" });
+
+        const check = await checkProvider(
+          { ...settings, format: formatForModel(settings, model) },
+          model,
+          { timeoutMs: 10_000 },
+        );
+
+        return json({
+          ...described,
+          model,
+          reachable: check.ok,
+          rateLimited: check.ok ? Boolean(check.rateLimited) : false,
+          latencyMs: check.ok ? check.latencyMs : undefined,
+          error: check.ok ? undefined : check.detail,
+        });
+      }
+
       if (path === "/api/sessions" && req.method === "GET") {
         return json({
-          sessions: manager.listFor(claims.userId, claims.role).map((s) => ({
+          sessions: (await manager.listFor(claims.userId, claims.role, claims.perms)).map((s) => ({
             id: s.id,
             userId: s.userId,
             siteName: s.siteName,
@@ -218,14 +362,19 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         if (!session) {
           const owner = await opts.store.sessionOwner(id);
           if (!owner) return json({ error: "No such session" }, 404);
-          if (claims.role !== "ADMIN" && owner !== claims.userId) {
-            return json({ error: "Not your session" }, 403);
-          }
+          const canStop =
+            claims.role === "ADMIN" ||
+            claims.perms?.includes("session.stop_others") ||
+            owner === claims.userId;
+          if (!canStop) return json({ error: "Not your session" }, 403);
           const cleared = await opts.store.forceStop(id, "browser was already gone");
           return json({ ok: true, cleared });
         }
 
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
+        if (
+          !manager.canControl(session, claims.userId, claims.role) &&
+          !claims.perms?.includes("session.stop_others")
+        ) {
           return json({ error: "Not your session" }, 403);
         }
         await manager.stop(session.id);
@@ -236,7 +385,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
       if (restartMatch && req.method === "POST") {
         const session = manager.get(restartMatch[1]!);
         if (!session) return json({ error: "No such session" }, 404);
-        if (!manager.canAccess(session, claims.userId, claims.role)) {
+        if (!manager.canControl(session, claims.userId, claims.role)) {
           return json({ error: "Not your session" }, 403);
         }
         try {
@@ -248,6 +397,28 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           }
           return json({ error: (error as Error).message }, 500);
         }
+      }
+
+      const jobAnswerMatch = /^\/api\/sessions\/([^/]+)\/job-answer$/.exec(path);
+      if (jobAnswerMatch && req.method === "POST") {
+        const session = manager.get(jobAnswerMatch[1]!);
+        if (!session || session.kind !== "job") return json({ error: "No active job session" }, 404);
+        if (session.userId !== claims.userId || claims.sessionId !== session.id) return json({ error: "Not your job session" }, 403);
+        const body = await req.json().catch(() => ({})) as { requestId?: string; value?: string | number | boolean | string[] };
+        if (!body.requestId || body.value === undefined) return json({ error: "requestId and value are required" }, 400);
+        manager.answerJobQuestion(session.id, body.requestId, body.value);
+        return json({ ok: true });
+      }
+
+      const takeoverMatch = /^\/api\/sessions\/([^/]+)\/takeover$/.exec(path);
+      if (takeoverMatch && req.method === "POST") {
+        const session = manager.get(takeoverMatch[1]!);
+        if (!session || session.kind !== "job") return json({ error: "No active job session" }, 404);
+        if (session.userId !== claims.userId || claims.sessionId !== session.id) return json({ error: "Not your job session" }, 403);
+        const body = await req.json().catch(() => ({})) as { requestId?: string; enabled?: boolean };
+        if (!body.requestId || typeof body.enabled !== "boolean") return json({ error: "requestId and enabled are required" }, 400);
+        manager.resolveTakeover(session.id, body.requestId, body.enabled);
+        return json({ ok: true });
       }
 
       const resumeMatch = /^\/api\/sessions\/([^/]+)\/resume$/.exec(path);
@@ -273,10 +444,17 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
       const fileListMatch = /^\/api\/sessions\/([^/]+)\/files$/.exec(path);
       if (fileListMatch && req.method === "GET") {
         const sessionId = fileListMatch[1]!;
-        const ownerId = await opts.store.sessionOwner(sessionId);
-        if (!ownerId) return json({ error: "No such session" }, 404);
-        if (claims.role !== "ADMIN" && ownerId !== claims.userId) {
-          return json({ error: "Not your session" }, 403);
+        const live = manager.get(sessionId);
+        if (live) {
+          if (!(await manager.canView(live, claims.userId, claims.role, claims.perms))) {
+            return json({ error: "Not your session" }, 403);
+          }
+        } else {
+          const ownerId = await opts.store.sessionOwner(sessionId);
+          if (!ownerId) return json({ error: "No such session" }, 404);
+          if (claims.role !== "ADMIN" && ownerId !== claims.userId) {
+            return json({ error: "Not your session" }, 403);
+          }
         }
 
         const store = await opts.objects();
@@ -298,7 +476,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         // A finished session still has its files on disk, so fall back to the
         // database for ownership rather than refusing everything after a stop.
         if (live) {
-          if (!manager.canAccess(live, claims.userId, claims.role)) {
+          if (!(await manager.canView(live, claims.userId, claims.role, claims.perms))) {
             return json({ error: "Not your session" }, 403);
           }
         } else {
@@ -376,7 +554,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         });
       },
 
-      message(ws: ServerWebSocket<SocketData>, raw) {
+      async message(ws: ServerWebSocket<SocketData>, raw) {
         let command: ClientCommand;
         try {
           command = JSON.parse(String(raw)) as ClientCommand;
@@ -387,23 +565,43 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
         const id = ws.data.sessionId;
         const session = manager.get(id);
         if (!session) return;
-        if (!manager.canAccess(session, ws.data.claims.userId, ws.data.claims.role)) return;
+        // Reading a session — its transcript, its frames — is what sharing and
+        // `session.view_others` grant. Writes below are gated harder.
+        if (!(await manager.canView(session, ws.data.claims.userId, ws.data.claims.role, ws.data.claims.perms))) {
+          return;
+        }
+        const mayControl = manager.canControl(session, ws.data.claims.userId, ws.data.claims.role);
+        const perms = ws.data.claims.perms ?? [];
 
         switch (command.type) {
           case "user_msg":
-            manager.send(id, command.text);
+            if (mayControl) manager.send(id, command.text);
             break;
           case "voice_task_start":
-            manager.startVoiceTask(id, command.requestId, command.text);
+            if (mayControl) manager.startVoiceTask(id, command.requestId, command.text);
             break;
           case "agent_interrupt":
-            void manager.interruptVoiceTask(id, command.requestId);
+            if (mayControl) void manager.interruptVoiceTask(id, command.requestId);
             break;
           case "approval":
-            manager.approve(id, command.requestId, command.approved);
+            // An admin or the owner always decides; `session.approve` lets a
+            // watcher answer an approval on a shared session.
+            if (mayControl || perms.includes("session.approve")) {
+              manager.approve(id, command.requestId, command.approved);
+            }
             break;
           case "choice":
-            manager.choose(id, command.requestId, command.value);
+            if (mayControl) manager.choose(id, command.requestId, command.value);
+            break;
+          case "job_answer":
+            if (session.userId === ws.data.claims.userId) {
+              manager.answerJobQuestion(id, command.requestId, command.value);
+            }
+            break;
+          case "takeover":
+            if (session.userId === ws.data.claims.userId) {
+              manager.resolveTakeover(id, command.requestId, command.enabled);
+            }
             break;
           case "preview":
             void manager.setPreview(id, command.enabled);
@@ -422,7 +620,7 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             }
             break;
           case "stop":
-            void manager.stop(id);
+            if (mayControl || perms.includes("session.stop_others")) void manager.stop(id);
             break;
         }
       },

@@ -19,6 +19,8 @@ export type SavedCookie = {
 
 export type LaunchOptions = {
   targetUrl: string;
+  /** Optional navigation policy installed before the first request. */
+  validateNavigation?: (url: string) => Promise<void>;
   /** Present for cookie_mint sites; a saved profile carries its own identity. */
   user?: TargetUser;
   sessionSecret?: string;
@@ -100,6 +102,18 @@ export async function launchRobotBrowser(opts: LaunchOptions): Promise<RobotBrow
 
   const cdpEndpoint = `http://127.0.0.1:${port}`;
   await waitForCdp(cdpEndpoint);
+
+  if (opts.validateNavigation) {
+    await context.route("**/*", async (route) => {
+      if (!route.request().isNavigationRequest()) return route.continue();
+      try {
+        await opts.validateNavigation!(route.request().url());
+        await route.continue();
+      } catch {
+        await route.abort("blockedbyclient");
+      }
+    });
+  }
 
   // A site we hold the signing secret for gets a freshly minted session. A site
   // the person signed in to themselves already carries one in its profile.

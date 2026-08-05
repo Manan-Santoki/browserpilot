@@ -8,7 +8,11 @@ export type AuditAction =
   | "user.logout"
   | "user.invited"
   | "user.invite_accepted"
+  | "user.created"
+  | "user.deleted"
   | "user.updated"
+  | "user.permissions_changed"
+  | "user.password_reset"
   | "site.created"
   | "site.updated"
   | "site.deleted"
@@ -19,10 +23,23 @@ export type AuditAction =
   | "session.started"
   | "session.resumed"
   | "session.stopped"
+  | "session.shared"
   | "session.approval"
   | "device.paired"
   | "device.revoked"
-  | "settings.updated";
+  | "settings.updated"
+  | "job.batch_created"
+  | "job.application_cancelled"
+  | "job.application_deleted"
+  | "job.profile_updated"
+  | "job.profile_deleted"
+  | "job.document_uploaded"
+  | "job.document_deleted"
+  | "job.answer_saved"
+  | "job.answer_deleted"
+  | "job.credential_revealed"
+  | "job.gmail_connected"
+  | "job.gmail_disconnected";
 
 /**
  * Append-only record of who did what. Never let a logging failure break the

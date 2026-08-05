@@ -7,7 +7,7 @@ import { Store } from "../src/store";
 import { createLocalStore } from "../src/storage/object-store";
 import type { RobotEvent } from "../src/session/events";
 import { withTestSettings } from "./support/settings";
-import { DB_HEAVY_TIMEOUT_MS } from "./helpers";
+import { DB_HEAVY_TIMEOUT_MS, fakeProvider } from "./helpers";
 
 const url =
   process.env.DATABASE_URL ?? "postgresql://browserpilot:devpassword@127.0.0.1:55432/browserpilot";
@@ -86,6 +86,7 @@ function makeDeps(overrides: Partial<ManagerDeps> = {}) {
 
   const deps: ManagerDeps = {
     store,
+    resolveProvider: async () => fakeProvider("resume-model"),
     profiles: {
       path: (site, user) => `/tmp/bp-profiles/${site}/${user}`,
       exists: async (site, user) => linked.has(`${site}:${user}`),
@@ -300,13 +301,15 @@ describe("ownership", () => {
     const id = await manager.create(userId, siteId);
     const session = manager.get(id)!;
 
-    expect(manager.listFor(userId, "USER")).toHaveLength(1);
-    expect(manager.listFor(otherUserId, "USER")).toHaveLength(0);
-    expect(manager.listFor(otherUserId, "ADMIN")).toHaveLength(1);
+    expect(await manager.listFor(userId, "USER")).toHaveLength(1);
+    expect(await manager.listFor(otherUserId, "USER")).toHaveLength(0);
+    expect(await manager.listFor(otherUserId, "ADMIN")).toHaveLength(1);
 
-    expect(manager.canAccess(session, userId, "USER")).toBe(true);
-    expect(manager.canAccess(session, otherUserId, "USER")).toBe(false);
-    expect(manager.canAccess(session, otherUserId, "ADMIN")).toBe(true);
+    expect(manager.canControl(session, userId, "USER")).toBe(true);
+    expect(manager.canControl(session, otherUserId, "USER")).toBe(false);
+    expect(manager.canControl(session, otherUserId, "ADMIN")).toBe(true);
+    expect(await manager.canView(session, otherUserId, "USER", ["session.view_others"])).toBe(true);
+    expect(await manager.canView(session, otherUserId, "USER")).toBe(false);
 
     await manager.stop(id);
     await cleanupSessions();

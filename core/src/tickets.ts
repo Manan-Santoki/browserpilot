@@ -15,6 +15,8 @@ export type TicketClaims = {
   sessionId: string;
   userId: string;
   role: "ADMIN" | "USER";
+  /** Granular permissions the console loaded for this user. Absent = none. */
+  perms?: string[];
 };
 
 export async function mintTicket(
@@ -44,7 +46,14 @@ export async function verifyTicket(
     if (typeof sessionId !== "string" || typeof userId !== "string") return null;
     if (role !== "ADMIN" && role !== "USER") return null;
 
-    return { sessionId, userId, role };
+    // Old tickets minted before permissions existed carry no `perms`; that is
+    // fine — a missing claim simply grants nothing granular.
+    const rawPerms = (payload as Record<string, unknown>).perms;
+    const perms = Array.isArray(rawPerms)
+      ? rawPerms.filter((value): value is string => typeof value === "string")
+      : undefined;
+
+    return { sessionId, userId, role, ...(perms ? { perms } : {}) };
   } catch {
     return null;
   }

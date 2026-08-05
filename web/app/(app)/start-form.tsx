@@ -17,7 +17,7 @@ import { startSession, type StartState } from "./sessions/actions";
 const initial: StartState = {};
 
 /** Falls through to whatever an admin has saved as the default. */
-const USE_DEFAULT: ModelChoice = { value: "default", label: "Default model" };
+const USE_DEFAULT: ModelChoice = { value: "default", label: "Default model", vision: true };
 
 type Props = {
   sites: Array<{ id: string; name: string }>;
@@ -72,7 +72,10 @@ export function StartSessionForm({ sites, models }: Props) {
           <SelectContent>
             {modelItems.map((model) => (
               <SelectItem key={model.value} value={model.value}>
+                {/* Said here rather than discovered mid-task: a blind model
+                    drives pages fine but cannot answer "show me". */}
                 {model.label}
+                {model.vision ? "" : " · no screenshots"}
               </SelectItem>
             ))}
           </SelectContent>
