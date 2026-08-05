@@ -37,6 +37,15 @@ fi
 RUNTIME_PORT="${BP_PORT:-8787}"
 WEB_PORT="${WEB_PORT:-3000}"
 
+# Code and schema ship together. Apply pending migrations before either
+# service can render a page or claim durable work; otherwise a newly added
+# workspace fails at its first query with a misleading application error.
+echo "applying database migrations"
+if ! (cd "$ROOT/db" && bunx drizzle-kit migrate); then
+  echo "database migrations failed; services were not started" >&2
+  exit 1
+fi
+
 free_port() {
   local port="$1"
   local owner

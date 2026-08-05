@@ -30,4 +30,6 @@ ENV BP_NODE_BIN=/usr/bin/node
 ENV BP_DOWNLOADS_DIR=/app/downloads
 
 EXPOSE 8787
-CMD ["bun", "run", "runtime/src/server.ts"]
+# The runtime is the deployment's migration owner. It brings the shared
+# database forward before it can claim queued work; repeated runs are no-ops.
+CMD ["sh", "-c", "cd /app/db && bunx drizzle-kit migrate && cd /app && exec bun run runtime/src/server.ts"]

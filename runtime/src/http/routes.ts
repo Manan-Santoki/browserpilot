@@ -16,6 +16,8 @@ import {
 } from "../agent/provider-settings";
 import { checkProvider } from "../agent/preflight";
 import { resolveModel } from "@browserpilot/core";
+import { contentTypeFor as jobContentTypeFor } from "@browserpilot/core";
+import { extractJobDocumentText } from "../jobs/documents";
 
 type SocketData = {
   sessionId: string;
@@ -38,6 +40,8 @@ export type ServerOptions = {
   providerEnv: ProviderEnv;
   /** Where per-session download directories live. */
   downloadsRoot: string;
+  /** Whether beta-only job routes may be reached. */
+  jobModeEnabled: boolean;
 };
 
 /**
@@ -94,6 +98,12 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
 
       if (path === "/health") return json({ ok: true });
 
+      const isJobRoute =
+        path === "/api/job-documents" ||
+        path.startsWith("/api/job-documents/") ||
+        /^\/api\/sessions\/[^/]+\/(job-answer|takeover)$/.test(path);
+      if (!opts.jobModeEnabled && isJobRoute) return json({ error: "Not found" }, 404);
+
       const claims = await claimsFor(req, url);
       if (!claims) return json({ error: "A valid ticket is required" }, 401);
 
@@ -147,6 +157,89 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           }
           return json({ error: (error as Error).message }, 500);
         }
+      }
+
+      if (path === "/api/job-documents" && req.method === "POST") {
+        const form = await req.formData().catch(() => null);
+        const file = form?.get("file");
+        const documentId = String(form?.get("documentId") ?? "");
+        if (!(file instanceof File) || !/^[0-9a-f-]{36}$/i.test(documentId)) {
+          return json({ error: "A file and valid documentId are required" }, 400);
+        }
+        if (file.size <= 0 || file.size > 10 * 1024 * 1024) {
+          return json({ error: "Documents must be between 1 byte and 10 MB" }, 400);
+        }
+        const safeName = basename(file.name).replace(/[^a-zA-Z0-9._ -]/g, "_") || "resume.pdf";
+        const allowed = new Set([
+          "application/pdf",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ]);
+        if (!allowed.has(file.type) && !/\.(pdf|docx)$/i.test(safeName)) {
+          return json({ error: "Only PDF and DOCX documents are supported" }, 415);
+        }
+        const staged = join(tmpdir(), `bp-job-${documentId}-${safeName}`);
+        const key = `jobs/${claims.userId}/${documentId}/${safeName}`;
+        try {
+          const plaintext = new Uint8Array(await file.arrayBuffer());
+          const extractedText = await extractJobDocumentText(
+            plaintext,
+            safeName,
+            file.type || jobContentTypeFor(safeName),
+          );
+          const encrypted = opts.store.sealJobDocument(
+            claims.userId,
+            documentId,
+            plaintext,
+          );
+          await Bun.write(staged, encrypted);
+          await (await opts.objects()).put(key, staged, "application/octet-stream");
+          return json({
+            key,
+            filename: safeName,
+            size: file.size,
+            contentType: file.type || jobContentTypeFor(safeName),
+            encryptionAad: `${claims.userId}:${documentId}`,
+            extractedTextEncrypted: opts.store.sealJobExtractedText(extractedText),
+          });
+        } finally {
+          await rm(staged, { force: true }).catch(() => {});
+        }
+      }
+
+      const jobDocumentMatch = /^\/api\/job-documents\/([0-9a-f-]{36})$/.exec(path);
+      if (jobDocumentMatch && req.method === "GET") {
+        const prefix = `jobs/${claims.userId}/${jobDocumentMatch[1]!}/`;
+        const entries = await (await opts.objects()).list(prefix);
+        const found = entries[0];
+        if (!found) return json({ error: "No such document" }, 404);
+        const body = await (await opts.objects()).get(found.key);
+        if (!body) return json({ error: "No such document" }, 404);
+        const sealed = new Uint8Array(await new Response(body).arrayBuffer());
+        let plaintext: Uint8Array;
+        try {
+          plaintext = opts.store.unsealJobDocument(claims.userId, jobDocumentMatch[1]!, sealed);
+        } catch {
+          return json({ error: "The document could not be decrypted" }, 500);
+        }
+        const responseBody = plaintext.buffer.slice(
+          plaintext.byteOffset,
+          plaintext.byteOffset + plaintext.byteLength,
+        ) as ArrayBuffer;
+        return new Response(responseBody, {
+          headers: {
+            "content-type": jobContentTypeFor(basename(found.key)),
+            "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(basename(found.key))}`,
+            "cache-control": "private, no-store",
+          },
+        });
+      }
+
+      if (jobDocumentMatch && req.method === "DELETE") {
+        const prefix = `jobs/${claims.userId}/${jobDocumentMatch[1]!}/`;
+        const objects = await opts.objects();
+        const entries = await objects.list(prefix);
+        await Promise.all(entries.map((entry) => objects.delete(entry.key)));
+        return json({ ok: true, deleted: entries.length });
       }
 
       // Read-only, admin-only: what the runtime resolved storage to, so the
@@ -304,6 +397,28 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
           }
           return json({ error: (error as Error).message }, 500);
         }
+      }
+
+      const jobAnswerMatch = /^\/api\/sessions\/([^/]+)\/job-answer$/.exec(path);
+      if (jobAnswerMatch && req.method === "POST") {
+        const session = manager.get(jobAnswerMatch[1]!);
+        if (!session || session.kind !== "job") return json({ error: "No active job session" }, 404);
+        if (session.userId !== claims.userId || claims.sessionId !== session.id) return json({ error: "Not your job session" }, 403);
+        const body = await req.json().catch(() => ({})) as { requestId?: string; value?: string | number | boolean | string[] };
+        if (!body.requestId || body.value === undefined) return json({ error: "requestId and value are required" }, 400);
+        manager.answerJobQuestion(session.id, body.requestId, body.value);
+        return json({ ok: true });
+      }
+
+      const takeoverMatch = /^\/api\/sessions\/([^/]+)\/takeover$/.exec(path);
+      if (takeoverMatch && req.method === "POST") {
+        const session = manager.get(takeoverMatch[1]!);
+        if (!session || session.kind !== "job") return json({ error: "No active job session" }, 404);
+        if (session.userId !== claims.userId || claims.sessionId !== session.id) return json({ error: "Not your job session" }, 403);
+        const body = await req.json().catch(() => ({})) as { requestId?: string; enabled?: boolean };
+        if (!body.requestId || typeof body.enabled !== "boolean") return json({ error: "requestId and enabled are required" }, 400);
+        manager.resolveTakeover(session.id, body.requestId, body.enabled);
+        return json({ ok: true });
       }
 
       const resumeMatch = /^\/api\/sessions\/([^/]+)\/resume$/.exec(path);
@@ -477,6 +592,16 @@ export function createServer(manager: SessionManager, opts: ServerOptions) {
             break;
           case "choice":
             if (mayControl) manager.choose(id, command.requestId, command.value);
+            break;
+          case "job_answer":
+            if (session.userId === ws.data.claims.userId) {
+              manager.answerJobQuestion(id, command.requestId, command.value);
+            }
+            break;
+          case "takeover":
+            if (session.userId === ws.data.claims.userId) {
+              manager.resolveTakeover(id, command.requestId, command.enabled);
+            }
             break;
           case "preview":
             void manager.setPreview(id, command.enabled);

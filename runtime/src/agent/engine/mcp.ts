@@ -34,7 +34,7 @@ export async function connectBrowserTools(opts: BrowserToolsOptions): Promise<Br
       // The MCP process inherits our environment for PATH and HOME, but must
       // not inherit anything that points at a model provider: it has no reason
       // to talk to one, and a stray key in a subprocess is a key that leaks.
-      env: providerFreeEnv(),
+      env: browserSubprocessEnv(),
     }),
   });
 
@@ -52,10 +52,21 @@ const PROVIDER_ENV_KEYS = [
   "ANTHROPIC_MODEL",
 ];
 
-function providerFreeEnv(): Record<string, string> {
+export function browserSubprocessEnv(
+  source: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(source)) {
     if (value !== undefined && !PROVIDER_ENV_KEYS.includes(key)) env[key] = value;
+  }
+  // Windows-hosted shells commonly export TMP/TEMP under /mnt/c. Unix-domain
+  // sockets cannot bind on that filesystem, so Playwright MCP must use the
+  // runtime's native temporary filesystem even when the parent shell does not.
+  if (platform !== "win32") {
+    env.TMPDIR = "/tmp";
+    env.TMP = "/tmp";
+    env.TEMP = "/tmp";
   }
   return env;
 }

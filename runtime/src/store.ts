@@ -1,7 +1,35 @@
-import { and, asc, count, eq, inArray, notInArray, sql } from "drizzle-orm";
-import { decryptSecret, encryptSecret } from "@browserpilot/core";
+import { and, asc, count, desc, eq, inArray, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+  decryptBinary,
+  decryptSecret,
+  decryptStructured,
+  encryptBinary,
+  encryptSecret,
+  encryptStructured,
+  generatePortalPassword,
+  hasSubmissionEvidence,
+  jobAnswerMatchCandidates,
+  jobAnswerMatchKey,
+  jobOptionSignature,
+  notificationRetryAt,
+  validateJobAnswer,
+  validateApplicationInventory,
+  type ApplicationInventory,
+  type JobAnswerType,
+  type SubmissionEvidence,
+} from "@browserpilot/core";
 import {
   createDatabase,
+  jobAnswers,
+  jobApplicationEvents,
+  jobApplications,
+  jobCandidateProfiles,
+  jobConsents,
+  jobConnections,
+  jobDocuments,
+  jobPortalAccounts,
+  jobQuestions,
+  notificationOutbox,
   robotSessions,
   sessionEvents,
   sessionShares,
@@ -61,7 +89,7 @@ export type ResumableSession = {
   id: string;
   userId: string;
   siteProfileId: string | null;
-  kind: "agent" | "login";
+  kind: "agent" | "login" | "job";
   status: SessionStatus;
   title: string | null;
   model: string | null;
@@ -86,6 +114,82 @@ export type TargetAccount = {
   cookies: SavedCookie[] | null;
 };
 
+export type ClaimedJobApplication = {
+  id: string;
+  userId: string;
+  sourceUrl: string;
+  normalizedUrl: string;
+  atsKind: string;
+  model: string | null;
+  resumeDocumentId: string | null;
+  reapplyRequested: boolean;
+  attempt: number;
+};
+
+export type StagedJobDocument = {
+  id: string;
+  filename: string;
+  objectKey: string;
+  contentType: string;
+  encryptionAad: string;
+};
+
+const CANDIDATE_FIELD_ALIASES: Record<string, string> = {
+  name: "fullName",
+  fullname: "fullName",
+  firstname: "firstName",
+  givenname: "firstName",
+  lastname: "lastName",
+  familyname: "lastName",
+  surname: "lastName",
+  email: "applicationEmail",
+  emailaddress: "applicationEmail",
+  applicationemail: "applicationEmail",
+  notificationemail: "notificationEmail",
+  phone: "phone",
+  phonenumber: "phone",
+  mobile: "phone",
+  mobilephone: "phone",
+  linkedin: "linkedin",
+  linkedinprofile: "linkedin",
+  linkedinurl: "linkedin",
+  github: "github",
+  githubprofile: "github",
+  githuburl: "github",
+  portfolio: "portfolio",
+  portfoliourl: "portfolio",
+  school: "school",
+  schoolname: "school",
+  university: "school",
+  degree: "degree",
+  degreelevel: "degree",
+  discipline: "discipline",
+  major: "discipline",
+  fieldofstudy: "discipline",
+  educationstartyear: "educationStartYear",
+  educationendyear: "educationEndYear",
+  streetaddress: "address",
+  addressline1: "address",
+  state: "region",
+  province: "region",
+  zipcode: "postalCode",
+  zip: "postalCode",
+};
+
+function canonicalCandidateField(field: string): string {
+  return CANDIDATE_FIELD_ALIASES[field.replace(/[^a-z0-9]/gi, "").toLowerCase()] ?? field;
+}
+
+export type ClaimedNotification = {
+  id: string;
+  userId: string;
+  applicationId: string | null;
+  toEmail: string;
+  template: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+};
+
 export class Store {
   private db: Database;
 
@@ -100,6 +204,18 @@ export class Store {
     private fallbackModel?: string,
   ) {
     this.db = createDatabase(databaseUrl);
+  }
+
+  sealJobDocument(userId: string, documentId: string, bytes: Uint8Array): Uint8Array {
+    return encryptBinary(bytes, this.masterKey, `${userId}:${documentId}`);
+  }
+
+  sealJobExtractedText(text: string): string {
+    return encryptSecret(text, this.masterKey);
+  }
+
+  unsealJobDocument(userId: string, documentId: string, bytes: Uint8Array): Uint8Array {
+    return decryptBinary(bytes, this.masterKey, `${userId}:${documentId}`);
   }
 
   async settings(): Promise<RuntimeSettings> {
@@ -478,5 +594,586 @@ export class Store {
       .where(inArray(robotSessions.status, [...LIVE_STATUSES]))
       .returning({ id: robotSessions.id });
     return rows.length;
+  }
+
+  /** Lease one queued job with a compare-and-set update so concurrent runtimes cannot both win. */
+  async claimJob(workerId: string, leaseMs = 5 * 60_000): Promise<ClaimedJobApplication | null> {
+    const now = new Date();
+    const [candidate] = await this.db
+      .select({ id: jobApplications.id })
+      .from(jobApplications)
+      .where(or(
+        eq(jobApplications.status, "queued"),
+        and(eq(jobApplications.status, "running"), lt(jobApplications.claimExpiresAt, now)),
+      ))
+      .orderBy(asc(jobApplications.createdAt))
+      .limit(1);
+    if (!candidate) return null;
+
+    const [claimed] = await this.db
+      .update(jobApplications)
+      .set({
+        status: "running",
+        claimedBy: workerId,
+        claimExpiresAt: new Date(now.getTime() + leaseMs),
+        startedAt: now,
+        attempt: sql`${jobApplications.attempt} + 1`,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(jobApplications.id, candidate.id),
+        or(
+          eq(jobApplications.status, "queued"),
+          and(eq(jobApplications.status, "running"), lt(jobApplications.claimExpiresAt, now)),
+        ),
+      ))
+      .returning({
+        id: jobApplications.id,
+        userId: jobApplications.userId,
+        sourceUrl: jobApplications.sourceUrl,
+        normalizedUrl: jobApplications.normalizedUrl,
+        atsKind: jobApplications.atsKind,
+        model: jobApplications.model,
+        resumeDocumentId: jobApplications.resumeDocumentId,
+        reapplyRequested: jobApplications.reapplyRequested,
+        attempt: jobApplications.attempt,
+      });
+    if (!claimed) return null;
+    await this.db.insert(jobApplicationEvents).values({ applicationId: claimed.id, type: "running", detail: "Application worker claimed the job" });
+    return claimed;
+  }
+
+  async createJobSession(application: ClaimedJobApplication, model: string): Promise<string> {
+    const now = new Date();
+    const [row] = await this.db.insert(robotSessions).values({
+      userId: application.userId,
+      siteProfileId: null,
+      jobApplicationId: application.id,
+      kind: "job",
+      status: "starting",
+      title: `Job application · ${new URL(application.sourceUrl).hostname}`,
+      model,
+      lastUrl: application.sourceUrl,
+    }).onConflictDoUpdate({
+      target: robotSessions.jobApplicationId,
+      set: {
+        status: "starting",
+        startedAt: now,
+        endedAt: null,
+        endedReason: null,
+        lastActivityAt: now,
+        title: `Job application · ${new URL(application.sourceUrl).hostname}`,
+        model,
+        lastUrl: application.sourceUrl,
+        lastUserMessage: null,
+      },
+    }).returning({ id: robotSessions.id });
+    return row!.id;
+  }
+
+  async candidatePlaceholders(userId: string, fields: string[]): Promise<Record<string, string>> {
+    const [row] = await this.db.select({
+      profileEncrypted: jobCandidateProfiles.profileEncrypted,
+      applicationEmailEncrypted: jobCandidateProfiles.applicationEmailEncrypted,
+      notificationEmailEncrypted: jobCandidateProfiles.notificationEmailEncrypted,
+    })
+      .from(jobCandidateProfiles).where(eq(jobCandidateProfiles.userId, userId)).limit(1);
+    if (!row) return {};
+    const profile = decryptStructured<Record<string, unknown>>(row.profileEncrypted, this.masterKey);
+    const available: Record<string, string> = {};
+    for (const field of fields) {
+      const canonical = canonicalCandidateField(field);
+      const derivedName = (canonical === "firstName" || canonical === "lastName") && typeof profile.fullName === "string" && profile.fullName.trim().length > 0;
+      if (derivedName || canonical === "applicationEmail" || canonical === "notificationEmail" || Object.hasOwn(profile, canonical)) {
+        available[field] = `{{BP_PROFILE:${canonical}}}`;
+      }
+    }
+    return available;
+  }
+
+  async resolveProfilePlaceholder(userId: string, field: string): Promise<unknown> {
+    const [row] = await this.db.select({
+      profileEncrypted: jobCandidateProfiles.profileEncrypted,
+      applicationEmailEncrypted: jobCandidateProfiles.applicationEmailEncrypted,
+      notificationEmailEncrypted: jobCandidateProfiles.notificationEmailEncrypted,
+    })
+      .from(jobCandidateProfiles).where(eq(jobCandidateProfiles.userId, userId)).limit(1);
+    if (!row) throw new Error("Candidate profile is not configured");
+    if (field === "applicationEmail") return decryptSecret(row.applicationEmailEncrypted, this.masterKey);
+    if (field === "notificationEmail") return decryptSecret(row.notificationEmailEncrypted, this.masterKey);
+    const profile = decryptStructured<Record<string, unknown>>(row.profileEncrypted, this.masterKey);
+    if (field === "firstName" || field === "lastName") {
+      const parts = typeof profile.fullName === "string" ? profile.fullName.trim().split(/\s+/).filter(Boolean) : [];
+      if (!parts.length) throw new Error("Candidate full name is not configured");
+      return field === "firstName" ? parts[0] : parts.slice(1).join(" ");
+    }
+    if (!Object.hasOwn(profile, field)) throw new Error("Candidate field is not configured");
+    return profile[field];
+  }
+
+  async jobConfigurationIssues(userId: string, applicationId: string): Promise<string[]> {
+    const [[profile], [application], [consent]] = await Promise.all([
+      this.db.select({ profileEncrypted: jobCandidateProfiles.profileEncrypted }).from(jobCandidateProfiles)
+        .where(eq(jobCandidateProfiles.userId, userId)).limit(1),
+      this.db.select({ resumeDocumentId: jobApplications.resumeDocumentId }).from(jobApplications)
+        .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId))).limit(1),
+      this.db.select({ id: jobConsents.id }).from(jobConsents).where(and(
+        eq(jobConsents.userId, userId),
+        eq(jobConsents.version, "2026-08-04"),
+        sql`${jobConsents.revokedAt} is null`,
+      )).limit(1),
+    ]);
+    const issues: string[] = [];
+    if (!profile) {
+      issues.push("Complete the candidate profile before retrying");
+    } else {
+      const candidate = decryptStructured<Record<string, unknown>>(profile.profileEncrypted, this.masterKey);
+      const hasFullName = typeof candidate.fullName === "string" && candidate.fullName.trim().length > 0;
+      const hasPhone = typeof candidate.phone === "string" && candidate.phone.trim().length > 0;
+      const hasCity = typeof candidate.city === "string" && candidate.city.trim().length > 0;
+      const hasCountry = typeof candidate.country === "string" && candidate.country.trim().length > 0;
+      if (!hasFullName || !hasPhone || !hasCity || !hasCountry) issues.push("Complete the candidate profile with full name, phone, current city, and country before retrying");
+    }
+    if (!consent) issues.push("Accept the current automatic-application consent before retrying");
+    if (!application?.resumeDocumentId) issues.push("Select a résumé before retrying");
+    else {
+      const [resume] = await this.db.select({ id: jobDocuments.id }).from(jobDocuments).where(and(
+        eq(jobDocuments.id, application.resumeDocumentId),
+        eq(jobDocuments.userId, userId),
+        eq(jobDocuments.kind, "resume"),
+      )).limit(1);
+      if (!resume) issues.push("The selected résumé is unavailable; choose another version");
+    }
+    return issues;
+  }
+
+  async savedJobAnswer(
+    userId: string,
+    question: { label: string; answerType: JobAnswerType; options: string[] },
+  ): Promise<unknown | null> {
+    const candidates = jobAnswerMatchCandidates(question.label, question.answerType, question.options);
+    const [row] = await this.db.select({ answerEncrypted: jobAnswers.answerEncrypted })
+      .from(jobAnswers)
+      .where(and(
+        eq(jobAnswers.userId, userId),
+        or(...candidates.map((candidate) => and(
+          eq(jobAnswers.questionKey, candidate.questionKey),
+          eq(jobAnswers.optionSignature, candidate.optionSignature),
+        ))),
+      ))
+      .limit(1);
+    if (!row) return null;
+    const answer = decryptStructured(row.answerEncrypted, this.masterKey);
+    return validateJobAnswer(question.answerType, question.options, answer) ? answer : null;
+  }
+
+  async coverLetterContext(userId: string, applicationId: string): Promise<{
+    profile: Record<string, unknown>;
+    resumeText: string;
+  }> {
+    const [application] = await this.db.select({ resumeDocumentId: jobApplications.resumeDocumentId })
+      .from(jobApplications)
+      .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId)))
+      .limit(1);
+    if (!application?.resumeDocumentId) throw new Error("The application has no selected résumé");
+    const [[profile], [resume]] = await Promise.all([
+      this.db.select({ profileEncrypted: jobCandidateProfiles.profileEncrypted })
+        .from(jobCandidateProfiles).where(eq(jobCandidateProfiles.userId, userId)).limit(1),
+      this.db.select({ extractedTextEncrypted: jobDocuments.extractedTextEncrypted })
+        .from(jobDocuments).where(and(
+          eq(jobDocuments.id, application.resumeDocumentId),
+          eq(jobDocuments.userId, userId),
+          eq(jobDocuments.kind, "resume"),
+        )).limit(1),
+    ]);
+    if (!profile) throw new Error("Candidate profile is not configured");
+    if (!resume?.extractedTextEncrypted) throw new Error("The selected résumé has no extracted text");
+    const full = decryptStructured<Record<string, unknown>>(profile.profileEncrypted, this.masterKey);
+    const allowed = ["fullName", "city", "region", "country", "summary", "employmentHistory", "education", "skills", "projects", "certifications", "linkedin", "github", "portfolio"];
+    const selected = Object.fromEntries(
+      allowed.filter((field) => Object.hasOwn(full, field)).map((field) => [field, full[field]]),
+    );
+    return {
+      profile: selected,
+      resumeText: decryptSecret(resume.extractedTextEncrypted, this.masterKey),
+    };
+  }
+
+  async applicationDocument(
+    userId: string,
+    applicationId: string,
+    kind: "resume" | "cover_letter",
+  ): Promise<StagedJobDocument | null> {
+    const [application] = await this.db.select({
+      resumeDocumentId: jobApplications.resumeDocumentId,
+      coverLetterDocumentId: jobApplications.coverLetterDocumentId,
+    }).from(jobApplications)
+      .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId)))
+      .limit(1);
+    const documentId = kind === "resume" ? application?.resumeDocumentId : application?.coverLetterDocumentId;
+    if (!documentId) return null;
+    const [document] = await this.db.select({
+      id: jobDocuments.id,
+      filename: jobDocuments.filename,
+      objectKey: jobDocuments.objectKey,
+      contentType: jobDocuments.contentType,
+      encryptionAad: jobDocuments.encryptionAad,
+    }).from(jobDocuments).where(and(
+      eq(jobDocuments.id, documentId),
+      eq(jobDocuments.userId, userId),
+      eq(jobDocuments.kind, kind),
+    )).limit(1);
+    return document ?? null;
+  }
+
+  async saveGeneratedCoverLetter(input: {
+    id: string;
+    userId: string;
+    applicationId: string;
+    filename: string;
+    objectKey: string;
+    contentType: string;
+    sizeBytes: number;
+    encryptionAad: string;
+    extractedTextEncrypted: string;
+  }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [owned] = await tx.select({ id: jobApplications.id }).from(jobApplications)
+        .where(and(eq(jobApplications.id, input.applicationId), eq(jobApplications.userId, input.userId))).limit(1);
+      if (!owned) throw new Error("Application is unavailable");
+      await tx.insert(jobDocuments).values({
+        id: input.id,
+        userId: input.userId,
+        kind: "cover_letter",
+        name: "Generated cover letter",
+        filename: input.filename,
+        objectKey: input.objectKey,
+        contentType: input.contentType,
+        sizeBytes: input.sizeBytes,
+        encryptionAad: input.encryptionAad,
+        extractedTextEncrypted: input.extractedTextEncrypted,
+        sourceApplicationId: input.applicationId,
+      });
+      await tx.update(jobApplications).set({ coverLetterDocumentId: input.id, updatedAt: new Date() })
+        .where(and(eq(jobApplications.id, input.applicationId), eq(jobApplications.userId, input.userId)));
+      await tx.insert(jobApplicationEvents).values({
+        applicationId: input.applicationId,
+        type: "cover_letter_generated",
+        detail: "Encrypted cover letter generated and staged",
+      });
+    });
+  }
+
+  async portalAccountPlaceholders(userId: string, portalKey: string, portalOrigin: string): Promise<{ username: string; password: string }> {
+    let [row] = await this.db.select().from(jobPortalAccounts)
+      .where(and(eq(jobPortalAccounts.userId, userId), eq(jobPortalAccounts.portalKey, portalKey))).limit(1);
+    if (!row) {
+      const [profile] = await this.db.select({ applicationEmailEncrypted: jobCandidateProfiles.applicationEmailEncrypted })
+        .from(jobCandidateProfiles).where(eq(jobCandidateProfiles.userId, userId)).limit(1);
+      if (!profile) throw new Error("Candidate profile is not configured");
+      [row] = await this.db.insert(jobPortalAccounts).values({
+        userId,
+        portalKey,
+        portalLabel: new URL(portalOrigin).hostname,
+        portalOrigin,
+        username: decryptSecret(profile.applicationEmailEncrypted, this.masterKey),
+        passwordEncrypted: encryptSecret(generatePortalPassword(), this.masterKey),
+        status: "pending",
+      }).returning();
+    }
+    return { username: `{{BP_SECRET:${row!.id}_username}}`, password: `{{BP_SECRET:${row!.id}_password}}` };
+  }
+
+  async markPortalAccountActive(userId: string, portalKey: string, verified = false): Promise<void> {
+    await this.db.update(jobPortalAccounts).set({
+      status: "active",
+      verificationStatus: verified ? "verified" : "confirmed",
+      ...(verified ? { verifiedAt: new Date() } : {}),
+      lastUsedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(jobPortalAccounts.userId, userId), eq(jobPortalAccounts.portalKey, portalKey)));
+  }
+
+  async resetPortalAccount(userId: string, portalKey: string): Promise<{ username: string; password: string }> {
+    const [row] = await this.db.update(jobPortalAccounts).set({
+      passwordEncrypted: encryptSecret(generatePortalPassword(), this.masterKey),
+      status: "pending",
+      verificationStatus: "reset_pending",
+      verifiedAt: null,
+      updatedAt: new Date(),
+    }).where(and(eq(jobPortalAccounts.userId, userId), eq(jobPortalAccounts.portalKey, portalKey)))
+      .returning({ id: jobPortalAccounts.id });
+    if (!row) throw new Error("Portal account is unavailable");
+    return {
+      username: `{{BP_SECRET:${row.id}_username}}`,
+      password: `{{BP_SECRET:${row.id}_password}}`,
+    };
+  }
+
+  async resolvePortalPlaceholder(userId: string, token: string): Promise<string> {
+    const match = /^([0-9a-f-]{36})_(username|password)$/i.exec(token);
+    if (!match) throw new Error("Unknown credential placeholder");
+    const [row] = await this.db.select().from(jobPortalAccounts)
+      .where(and(eq(jobPortalAccounts.id, match[1]!), eq(jobPortalAccounts.userId, userId))).limit(1);
+    if (!row) throw new Error("Portal credential is unavailable");
+    return match[2] === "username" ? row.username : decryptSecret(row.passwordEncrypted, this.masterKey);
+  }
+
+  async discoverJobIdentity(userId: string, applicationId: string, identity: {
+    portalKey: string;
+    externalJobId: string;
+    company?: string;
+    roleTitle?: string;
+    location?: string;
+  }): Promise<{ duplicateOf?: string }> {
+    const [application] = await this.db.select({ reapplyRequested: jobApplications.reapplyRequested })
+      .from(jobApplications)
+      .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId)))
+      .limit(1);
+    if (!application) throw new Error("Application is unavailable");
+    const [duplicate] = await this.db.select({ id: jobApplications.id, status: jobApplications.status })
+      .from(jobApplications).where(and(
+        eq(jobApplications.userId, userId),
+        ne(jobApplications.id, applicationId),
+        eq(jobApplications.portalKey, identity.portalKey),
+        eq(jobApplications.externalJobId, identity.externalJobId),
+      )).orderBy(asc(jobApplications.createdAt)).limit(1);
+    const duplicateOf = duplicate && !application.reapplyRequested ? duplicate.id : undefined;
+    await this.db.update(jobApplications).set({
+      portalKey: identity.portalKey,
+      externalJobId: identity.externalJobId,
+      company: identity.company?.slice(0, 300),
+      roleTitle: identity.roleTitle?.slice(0, 300),
+      location: identity.location?.slice(0, 300),
+      ...(duplicateOf ? {
+        status: "not_applied" as const,
+        duplicateOfApplicationId: duplicateOf,
+        statusDetail: `Linked to existing ${duplicate!.status} application after portal discovery`,
+        finishedAt: new Date(),
+        claimedBy: null,
+        claimExpiresAt: null,
+      } : {}),
+      updatedAt: new Date(),
+    }).where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId)));
+    if (duplicateOf) {
+      await this.enqueueJobNotification(
+        userId,
+        applicationId,
+        "duplicate-after-launch",
+        "Duplicate application detected after portal discovery",
+      );
+    }
+    return duplicateOf ? { duplicateOf } : {};
+  }
+
+  async applicationEmail(userId: string): Promise<string> {
+    const [profile] = await this.db.select({ applicationEmailEncrypted: jobCandidateProfiles.applicationEmailEncrypted })
+      .from(jobCandidateProfiles).where(eq(jobCandidateProfiles.userId, userId)).limit(1);
+    if (!profile) throw new Error("Candidate profile is not configured");
+    return decryptSecret(profile.applicationEmailEncrypted, this.masterKey);
+  }
+
+  async recordGmailUse(userId: string, error?: Error): Promise<void> {
+    const message = error?.message.slice(0, 300).replace(/\S+@\S+/g, "[email]") ?? null;
+    const revoked = Boolean(error && /(?:401|invalid_grant|revoked)/i.test(error.message));
+    await this.db.update(jobConnections).set({
+      state: revoked ? "revoked" : error ? "error" : "active",
+      lastError: message,
+      lastUsedAt: new Date(),
+      ...(revoked ? { revokedAt: new Date() } : {}),
+      updatedAt: new Date(),
+    }).where(and(eq(jobConnections.userId, userId), eq(jobConnections.kind, "gmail")));
+  }
+
+  async saveJobAnswer(userId: string, applicationId: string, question: { label: string; answerType: JobAnswerType; options: string[] }, value: unknown): Promise<void> {
+    if (!validateJobAnswer(question.answerType, question.options, value)) {
+      throw new Error("The answer does not match the exact portal question options");
+    }
+    const optionSignature = jobOptionSignature(question.answerType, question.options);
+    const questionKey = jobAnswerMatchKey(question.label, question.answerType, question.options);
+    await this.db.transaction(async (tx) => {
+      await tx.insert(jobAnswers).values({
+        userId, questionKey, questionLabel: question.label, answerType: question.answerType,
+        optionSignature, answerEncrypted: encryptStructured(value, this.masterKey), category: "custom",
+      }).onConflictDoUpdate({
+        target: [jobAnswers.userId, jobAnswers.questionKey, jobAnswers.optionSignature],
+        set: { answerEncrypted: encryptStructured(value, this.masterKey), updatedAt: new Date() },
+      });
+      await tx.update(jobQuestions).set({ status: "answered", answeredAt: new Date() })
+        .where(and(eq(jobQuestions.applicationId, applicationId), eq(jobQuestions.questionKey, questionKey)));
+      await tx.update(jobApplications).set({ status: "running", attentionKind: null, statusDetail: "Application resumed with the saved answer", updatedAt: new Date() })
+        .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId), eq(jobApplications.status, "needs_attention")));
+    });
+  }
+
+  async recordJobQuestion(userId: string, event: Extract<RobotEvent, { type: "job_question" }>): Promise<void> {
+    const options = event.options ?? [];
+    const questionKey = jobAnswerMatchKey(event.question, event.answerType, options);
+    const optionSignature = jobOptionSignature(event.answerType, options);
+    await this.db.insert(jobQuestions).values({
+      applicationId: event.applicationId, userId, requestId: event.requestId,
+      questionKey, questionLabel: event.question, answerType: event.answerType,
+      options, optionSignature,
+    }).onConflictDoNothing();
+    const rows = await this.db.update(jobApplications).set({ status: "needs_attention", attentionKind: "needs_answer", statusDetail: "A new application question needs an answer", updatedAt: new Date() })
+      .where(and(eq(jobApplications.id, event.applicationId), eq(jobApplications.userId, userId), inArray(jobApplications.status, ["running", "needs_attention"])))
+      .returning({ id: jobApplications.id });
+    if (rows.length) await this.enqueueJobNotification(userId, event.applicationId, "needs-answer", "A job application needs an answer");
+  }
+
+  async recordTakeover(userId: string, event: Extract<RobotEvent, { type: "manual_takeover" }>): Promise<void> {
+    const rows = await this.db.update(jobApplications).set({
+      status: event.active ? "needs_attention" : "running",
+      attentionKind: event.active ? "needs_takeover" : null,
+      takeoverRequestId: event.active ? event.requestId : null,
+      statusDetail: event.active ? event.reason.slice(0, 500) : "Application resumed after manual takeover",
+      updatedAt: new Date(),
+    }).where(and(eq(jobApplications.id, event.applicationId), eq(jobApplications.userId, userId), inArray(jobApplications.status, ["running", "needs_attention"])))
+      .returning({ id: jobApplications.id });
+    if (event.active && rows.length) await this.enqueueJobNotification(userId, event.applicationId, "needs-takeover", "A job application needs manual takeover");
+  }
+
+  async prepareJobSubmission(userId: string, applicationId: string, inventory: ApplicationInventory): Promise<{ ok: boolean; reasons?: string[] }> {
+    const validation = validateApplicationInventory(inventory);
+    const [[consent], [application], [pending]] = await Promise.all([
+      this.db.select({ id: jobConsents.id }).from(jobConsents)
+        .where(and(eq(jobConsents.userId, userId), eq(jobConsents.version, "2026-08-04"), sql`${jobConsents.revokedAt} is null`)).limit(1),
+      this.db.select({
+        resumeDocumentId: jobApplications.resumeDocumentId,
+        coverLetterDocumentId: jobApplications.coverLetterDocumentId,
+        status: jobApplications.status,
+      }).from(jobApplications).where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId))).limit(1),
+      this.db.select({ value: count() }).from(jobQuestions).where(and(
+        eq(jobQuestions.applicationId, applicationId),
+        eq(jobQuestions.userId, userId),
+        eq(jobQuestions.status, "pending"),
+      )),
+    ]);
+    const reasons = validation.ok ? [] : [...validation.reasons];
+    if (!consent) reasons.push("Routine application consent is missing");
+    if (application?.status !== "running") reasons.push("The application is no longer eligible for submission");
+    if (!application?.resumeDocumentId) reasons.push("The selected résumé record is missing");
+    if (inventory.coverLetterRequired && !application?.coverLetterDocumentId) reasons.push("The generated cover letter record is missing");
+    if (Number(pending?.value ?? 0) > 0) reasons.push("Saved application questions remain unresolved");
+    const ok = reasons.length === 0;
+    await this.db.update(jobApplications).set({ submissionInventory: inventory, updatedAt: new Date() })
+      .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId)));
+    return ok ? { ok: true } : { ok: false, reasons };
+  }
+
+  async recordJobSubmission(userId: string, applicationId: string, evidence: SubmissionEvidence): Promise<{ ok: boolean; reason?: string }> {
+    if (!hasSubmissionEvidence(evidence)) return { ok: false, reason: "Confirmation evidence is required" };
+    const now = new Date();
+    const rows = await this.db.update(jobApplications).set({
+      status: "applied", statusDetail: "Submission confirmed", submittedAt: now, finishedAt: now,
+      confirmationText: evidence.confirmationText?.slice(0, 2000), confirmationUrl: evidence.confirmationUrl,
+      confirmationScreenshotKey: evidence.screenshotKey, confirmationReference: evidence.referenceId,
+      claimExpiresAt: null, updatedAt: now,
+    }).where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId), eq(jobApplications.status, "running")))
+      .returning({ id: jobApplications.id });
+    if (!rows.length) return { ok: false, reason: "Application is unavailable" };
+    await this.enqueueJobNotification(userId, applicationId, "submitted", "Application submitted");
+    return { ok: true };
+  }
+
+  async failJob(userId: string, applicationId: string, reason: string): Promise<void> {
+    const safeReason = reason.slice(0, 1000).replace(/(?:password|token|code|answer)\s*[:=]\s*\S+/gi, "[redacted]");
+    const rows = await this.db.update(jobApplications).set({ status: "failed", failureReason: safeReason, statusDetail: safeReason, finishedAt: new Date(), claimExpiresAt: null, updatedAt: new Date() })
+      .where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId), inArray(jobApplications.status, ["queued", "running", "needs_attention"])))
+      .returning({ id: jobApplications.id });
+    if (rows.length) await this.enqueueJobNotification(userId, applicationId, "failed", "Application failed");
+  }
+
+  async pauseJob(userId: string, applicationId: string, reason: string): Promise<void> {
+    const rows = await this.db.update(jobApplications).set({
+      status: "needs_attention", attentionKind: "interrupted", statusDetail: reason.slice(0, 500),
+      claimExpiresAt: null, claimedBy: null, updatedAt: new Date(),
+    }).where(and(
+      eq(jobApplications.id, applicationId),
+      eq(jobApplications.userId, userId),
+      notInArray(jobApplications.status, ["applied", "failed", "cancelled", "not_applied"]),
+    )).returning({ id: jobApplications.id });
+    if (rows.length) await this.enqueueJobNotification(userId, applicationId, "needs-takeover", "Application needs attention");
+  }
+
+  async releaseJob(userId: string, applicationId: string): Promise<void> {
+    await this.db.update(jobApplications).set({
+      status: "queued", claimedBy: null, claimExpiresAt: null, startedAt: null, updatedAt: new Date(),
+    }).where(and(eq(jobApplications.id, applicationId), eq(jobApplications.userId, userId), eq(jobApplications.status, "running")));
+  }
+
+  async renewJobLease(userId: string, applicationId: string, leaseMs = 5 * 60_000): Promise<void> {
+    await this.db.update(jobApplications).set({
+      claimExpiresAt: new Date(Date.now() + leaseMs),
+      updatedAt: new Date(),
+    }).where(and(
+      eq(jobApplications.id, applicationId),
+      eq(jobApplications.userId, userId),
+      eq(jobApplications.status, "running"),
+    ));
+  }
+
+  /** A restart never blindly retries a browser that may already have submitted a form. */
+  async recoverInterruptedJobs(): Promise<number> {
+    const rows = await this.db.update(jobApplications).set({
+      status: "needs_attention", attentionKind: "runtime_restart",
+      statusDetail: "The runtime restarted during this application. Review before retrying.",
+      claimedBy: null, claimExpiresAt: null, updatedAt: new Date(),
+    }).where(eq(jobApplications.status, "running")).returning({ id: jobApplications.id });
+    return rows.length;
+  }
+
+  async gmailCredentials(userId: string): Promise<{ accountEmail: string; refreshToken: string } | null> {
+    const [row] = await this.db.select().from(jobConnections).where(and(
+      eq(jobConnections.userId, userId), eq(jobConnections.kind, "gmail"), eq(jobConnections.state, "active"),
+    )).limit(1);
+    if (!row) return null;
+    return { accountEmail: row.accountEmail, refreshToken: decryptSecret(row.refreshTokenEncrypted, this.masterKey) };
+  }
+
+  async claimNotification(): Promise<ClaimedNotification | null> {
+    const now = new Date();
+    const [candidate] = await this.db.select({ id: notificationOutbox.id }).from(notificationOutbox)
+      .where(and(inArray(notificationOutbox.status, ["pending", "failed"]), lt(notificationOutbox.nextAttemptAt, new Date(now.getTime() + 1))))
+      .orderBy(asc(notificationOutbox.nextAttemptAt)).limit(1);
+    if (!candidate) return null;
+    const [claimed] = await this.db.update(notificationOutbox).set({ status: "sending", attempts: sql`${notificationOutbox.attempts} + 1` })
+      .where(and(eq(notificationOutbox.id, candidate.id), inArray(notificationOutbox.status, ["pending", "failed"])))
+      .returning({ id: notificationOutbox.id, userId: notificationOutbox.userId, applicationId: notificationOutbox.applicationId,
+        toEmail: notificationOutbox.toEmail, template: notificationOutbox.template, payload: notificationOutbox.payload, attempts: notificationOutbox.attempts });
+    return claimed ? { ...claimed, payload: claimed.payload as Record<string, unknown> } : null;
+  }
+
+  async finishNotification(notification: ClaimedNotification, error?: Error): Promise<void> {
+    await this.db.update(notificationOutbox).set(error ? {
+      status: "failed",
+      nextAttemptAt: notificationRetryAt(notification.attempts),
+      lastError: error.message.slice(0, 300).replace(/\S+@\S+/g, "[email]"),
+    } : { status: "sent", sentAt: new Date(), lastError: null })
+      .where(eq(notificationOutbox.id, notification.id));
+  }
+
+  async recordNotificationStatus(
+    applicationId: string | null,
+    status: "pending" | "sending" | "sent" | "failed",
+  ): Promise<void> {
+    if (!applicationId) return;
+    const [session] = await this.db.select({ id: robotSessions.id }).from(robotSessions)
+      .where(eq(robotSessions.jobApplicationId, applicationId))
+      .orderBy(desc(robotSessions.startedAt)).limit(1);
+    if (!session) return;
+    await this.appendEvent(session.id, { type: "notification_status", applicationId, status });
+  }
+
+  private async enqueueJobNotification(userId: string, applicationId: string, template: string, message: string): Promise<void> {
+    const [profile] = await this.db.select({ notificationEmailEncrypted: jobCandidateProfiles.notificationEmailEncrypted })
+      .from(jobCandidateProfiles).where(eq(jobCandidateProfiles.userId, userId)).limit(1);
+    if (!profile) return;
+    const inserted = await this.db.insert(notificationOutbox).values({
+      userId, applicationId, dedupeKey: `${applicationId}:${template}`,
+      toEmail: decryptSecret(profile.notificationEmailEncrypted, this.masterKey),
+      template, payload: { applicationId, message },
+    }).onConflictDoNothing().returning({ id: notificationOutbox.id });
+    if (inserted.length) await this.recordNotificationStatus(applicationId, "pending");
   }
 }

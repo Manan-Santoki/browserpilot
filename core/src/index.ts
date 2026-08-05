@@ -1,6 +1,13 @@
 export { hashPassword, verifyPassword } from "./password";
 export { generateToken, generatePairingCode, hashToken, tokensMatch, type TokenPair } from "./tokens";
-export { encryptSecret, decryptSecret } from "./secrets";
+export {
+  decryptBinary,
+  decryptSecret,
+  decryptStructured,
+  encryptBinary,
+  encryptSecret,
+  encryptStructured,
+} from "./secrets";
 export { mintTicket, verifyTicket, type TicketClaims } from "./tickets";
 export {
   PERMISSIONS,
@@ -23,3 +30,35 @@ export {
   type WireFormat,
 } from "./models";
 export { normalizeBaseUrl } from "./provider";
+export { isJobModeEnabled, type FeatureEnvironment } from "./features";
+export {
+  ATS_PLAYBOOKS,
+  JOB_CONSENT_VERSION,
+  JOB_TERMINAL_STATUSES,
+  atsPlaybook,
+  assertPublicJobUrl,
+  detectAts,
+  generatePortalPassword,
+  hasSubmissionEvidence,
+  isPrivateHostname,
+  jobAnswerMatchKey,
+  jobAnswerMatchCandidates,
+  jobOptionSignature,
+  normalizeJobQuestion,
+  normalizeJobUrl,
+  notificationRetryAt,
+  parseGmailVerification,
+  portalAccountKey,
+  parseJobPlaceholder,
+  redactJobToolInput,
+  resolvePublicJobUrl,
+  substituteJobPlaceholders,
+  validateJobAnswer,
+  validateApplicationInventory,
+  type ApplicationInventory,
+  type AtsPlaybook,
+  type DnsLookup,
+  type JobAnswerType,
+  type JobPlaceholder,
+  type SubmissionEvidence,
+} from "./jobs";

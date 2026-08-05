@@ -45,6 +45,7 @@ function start() {
     storageEnv: {},
     providerEnv: {},
     downloadsRoot: managerConfig.downloadsRoot,
+    jobModeEnabled: true,
   });
   running = handle;
   // Bun types the port as optional; it is always set for a listening server,

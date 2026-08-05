@@ -48,6 +48,7 @@ function start() {
     storageEnv: {},
     providerEnv: {},
     downloadsRoot: managerConfig.downloadsRoot,
+    jobModeEnabled: true,
   });
   running = handle;
   return { manager, state, port: handle.server.port };
@@ -98,6 +99,7 @@ describe("authentication", () => {
     });
     expect(res.status).toBe(401);
   });
+
 });
 
 describe("session routes", () => {

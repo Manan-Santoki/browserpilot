@@ -67,6 +67,22 @@ describe("launchRobotBrowser", () => {
     expect(browser.downloadsDir).toBe(downloadsDir);
   });
 
+  test("installs the navigation policy before the first request and blocks later destinations", async () => {
+    const checked: string[] = [];
+    const guarded = await launchRobotBrowser({
+      targetUrl: `http://127.0.0.1:${server.port}/allowed`,
+      downloadsDir,
+      validateNavigation: async (url) => {
+        checked.push(url);
+        if (new URL(url).pathname === "/private") throw new Error("private destination");
+      },
+    });
+    expect(checked.some((url) => new URL(url).pathname === "/allowed")).toBe(true);
+    await expect(guarded.page.goto(`http://127.0.0.1:${server.port}/private`)).rejects.toThrow();
+    expect(checked.some((url) => new URL(url).pathname === "/private")).toBe(true);
+    await guarded.close();
+  }, 60_000);
+
   test("reports a process-level browser disconnect exactly once", async () => {
     const profileDir = await mkdtemp(join(tmpdir(), "bp-disconnect-"));
     const victim = await launchRobotBrowser({

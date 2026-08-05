@@ -1,4 +1,5 @@
-import { streamText, stepCountIs, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { streamText, stepCountIs, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { z } from "zod/v4";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { WireFormat } from "@browserpilot/core";
@@ -10,6 +11,7 @@ import { compact } from "./compaction";
 import { hoistImages, needsImageHoist, type CapturedImage } from "./messages";
 import { connectBrowserTools, type BrowserTools } from "./mcp";
 import { choiceTool, wrapMcpTools } from "./tools";
+import { validateApplicationInventory, type ApplicationInventory } from "@browserpilot/core";
 
 /**
  * The agent loop, driven by us.
@@ -128,16 +130,21 @@ export async function startAiSdkAgent(
     string,
     { options: ChoiceOption[]; resolve: (choice: ChoiceOption | null) => void }
   >();
+  const jobAnswers = new Map<string, (value: string | number | boolean | string[] | null) => void>();
+  const takeovers = new Map<string, (enabled: boolean) => void>();
 
   let nextRequestId = 0;
   let nextChoiceId = 0;
+  let nextJobRequestId = 0;
   let screenshots = 0;
   let completedDownload: string | undefined;
   let interruptedForDownload = false;
   let interruptedByUser = false;
   let stopped = false;
+  let manualTakeoverCompleted = false;
   let currentTurn: AbortController | undefined;
   let activeVoiceTaskId: string | undefined;
+  let submissionPrepared = false;
 
   /** Images awaiting the hoist, cleared once carried into a message. */
   let pendingImages: CapturedImage[] = [];
@@ -183,6 +190,8 @@ export async function startAiSdkAgent(
       onImage: saveImage,
       completedDownload: () => completedDownload,
       collectImage: (image) => pendingImages.push(image),
+      canSubmit: opts.job ? () => submissionPrepared : undefined,
+      resolvePlaceholder: opts.job?.resolvePlaceholder,
     }),
     ask_user_choice: choiceTool({
       emit,
@@ -207,8 +216,172 @@ export async function startAiSdkAgent(
     }),
   };
 
+  if (opts.job) {
+    const job = opts.job;
+    tools.lookup_candidate = tool({
+      description: "Look up only the candidate fields needed for the visible form. Values are opaque placeholders substituted by the runtime.",
+      inputSchema: z.object({ fields: z.array(z.string().min(1).max(120)).min(1).max(30) }),
+      execute: async ({ fields }) => ({ text: JSON.stringify(await job.lookupCandidate(fields)) }),
+    });
+    tools.lookup_saved_answer = tool({
+      description: "Look up an exact previously saved answer. Returns only an opaque placeholder; non-identical questions or option sets return no match.",
+      inputSchema: z.object({
+        question: z.string().min(1).max(5_000),
+        answerType: z.enum(["text", "boolean", "number", "date", "single_choice", "multi_choice"]),
+        options: z.array(z.string().min(1).max(300)).max(300).default([]),
+      }),
+      execute: async ({ question, answerType, options }) => ({
+        text: JSON.stringify({ placeholder: await job.lookupSavedAnswer({ label: question, answerType, options }) }),
+      }),
+    });
+    tools.get_portal_account = tool({
+      description: "Create or retrieve the playbook-scoped portal account. Returned credentials are opaque placeholders, never plaintext.",
+      inputSchema: z.object({}),
+      execute: async () => ({ text: JSON.stringify(await job.getPortalAccount()) }),
+    });
+    tools.confirm_portal_account = tool({
+      description: "Mark the stored portal credential active only after signup or login is visibly confirmed.",
+      inputSchema: z.object({ emailVerified: z.boolean().default(false) }),
+      execute: async ({ emailVerified }) => {
+        await job.confirmPortalAccount(emailVerified);
+        return { text: "The scoped portal credential is active." };
+      },
+    });
+    tools.reset_portal_account = tool({
+      description: "When a stored portal credential is rejected, rotate it into a recoverable pending password-reset credential. Returns opaque placeholders.",
+      inputSchema: z.object({}),
+      execute: async () => ({ text: JSON.stringify(await job.resetPortalAccount()) }),
+    });
+    tools.wait_for_gmail_verification = tool({
+      description: "Wait for a narrowly scoped Gmail verification received after the account action. Returns opaque verification placeholders.",
+      inputSchema: z.object({ afterIso: z.string().min(1) }),
+      execute: async ({ afterIso }) => ({ text: JSON.stringify(await job.waitForGmailVerification(afterIso)) }),
+    });
+    tools.request_unseen_answer = tool({
+      description: "Pause for an exact unseen application question. Copy the visible/schema label and every option verbatim; never paraphrase or replace options with Yes/No. The answer is encrypted and saved before this call returns.",
+      inputSchema: z.object({
+        question: z.string().min(1).max(5_000),
+        answerType: z.enum(["text", "boolean", "number", "date", "single_choice", "multi_choice"]),
+        options: z.array(z.string().min(1).max(300)).max(300).default([]),
+      }),
+      execute: async ({ question, answerType, options }) => {
+        const existing = await job.lookupSavedAnswer({ label: question, answerType, options });
+        if (existing !== null) {
+          return { text: JSON.stringify({ saved: true, placeholder: existing, source: "existing_exact_answer" }) };
+        }
+        const requestId = `jobq_${++nextJobRequestId}`;
+        emit({ type: "job_question", requestId, applicationId: job.applicationId, question, answerType, ...(options.length ? { options } : {}) });
+        emit({ type: "application_status", applicationId: job.applicationId, status: "needs_attention", detail: "A new application question needs an answer" });
+        const value = await new Promise<string | number | boolean | string[] | null>((resolve) => jobAnswers.set(requestId, resolve));
+        jobAnswers.delete(requestId);
+        if (value === null) return { text: "The application stopped before the question was answered." };
+        const placeholder = await job.saveAnswer({ label: question, answerType, options }, value);
+        return { text: JSON.stringify({ saved: true, placeholder }) };
+      },
+    });
+    tools.get_application_schema = tool({
+      description: "Retrieve exact public ATS question labels, required flags, and option values. For an embedded Greenhouse form, read the board token from the page's embed script or iframe `for=` parameter and pass it here. Use the returned wording verbatim.",
+      inputSchema: z.object({ boardToken: z.string().regex(/^[a-z0-9_-]{1,100}$/i).optional() }),
+      execute: async (input) => ({ text: JSON.stringify(await job.getApplicationSchema(input)) }),
+    });
+    tools.get_application_documents = tool({
+      description: "Return opaque upload placeholders for the selected résumé and generated cover letter, without exposing decrypted paths.",
+      inputSchema: z.object({}),
+      execute: async () => ({ text: JSON.stringify(await job.getApplicationDocuments()) }),
+    });
+    tools.get_cover_letter_context = tool({
+      description: "Retrieve only the selected résumé text and limited structured profile fields needed to draft a required cover letter.",
+      inputSchema: z.object({}),
+      execute: async () => ({ text: JSON.stringify(await job.getCoverLetterContext()) }),
+    });
+    tools.generate_cover_letter = tool({
+      description: "Save a generated ATS-friendly PDF cover letter encrypted and associated with this application. Call only when the visible application requires one.",
+      inputSchema: z.object({ content: z.string().min(80).max(20_000) }),
+      execute: async ({ content }) => ({ text: JSON.stringify({ placeholder: await job.generateCoverLetter(content) }) }),
+    });
+    tools.record_job_identity = tool({
+      description: "Record the portal job ID and visible metadata immediately after discovery. If it matches an existing application, stop instead of relaunching unless reapply was selected.",
+      inputSchema: z.object({
+        externalJobId: z.string().min(1).max(300),
+        company: z.string().max(300).optional(),
+        roleTitle: z.string().max(300).optional(),
+        location: z.string().max(300).optional(),
+      }),
+      execute: async (identity) => {
+        const result = await job.discoverJob(identity);
+        if (result.duplicateOf) {
+          emit({ type: "application_status", applicationId: job.applicationId, status: "not_applied", detail: "Duplicate application linked after portal discovery" });
+        }
+        return { text: JSON.stringify(result) };
+      },
+    });
+    tools.request_manual_takeover = tool({
+      description: "Pause for CAPTCHA, device confirmation, non-email MFA, revoked access, or unusual legal language. Never bypass these controls.",
+      inputSchema: z.object({ reason: z.string().min(1).max(500) }),
+      execute: async ({ reason }) => {
+        const requestId = `takeover_${++nextJobRequestId}`;
+        emit({ type: "manual_takeover", requestId, applicationId: job.applicationId, reason, active: true });
+        emit({ type: "application_status", applicationId: job.applicationId, status: "needs_attention", detail: reason });
+        const resumed = await new Promise<boolean>((resolve) => takeovers.set(requestId, resolve));
+        takeovers.delete(requestId);
+        if (resumed) manualTakeoverCompleted = true;
+        emit({ type: "manual_takeover", requestId, applicationId: job.applicationId, reason, active: false });
+        return { text: resumed ? "The user returned control. Take a fresh snapshot before continuing." : "The user cancelled manual takeover." };
+      },
+    });
+    tools.prepare_application_submission = tool({
+      description: "Provide the complete required-field inventory. A Submit/Apply click is blocked until this returns ok.",
+      inputSchema: z.object({
+        requiredFields: z.array(z.object({ key: z.string().min(1).max(160), handled: z.boolean() })),
+        unresolvedQuestionIds: z.array(z.string()), resumeStaged: z.boolean(), coverLetterRequired: z.boolean(),
+        coverLetterStaged: z.boolean(), consentGranted: z.boolean(), unusualLegalLanguage: z.boolean(),
+      }),
+      execute: async (inventory) => {
+        const reviewedInventory = manualTakeoverCompleted && inventory.unusualLegalLanguage
+          ? { ...inventory, unusualLegalLanguage: false }
+          : inventory;
+        const local = validateApplicationInventory(reviewedInventory as ApplicationInventory);
+        if (!local.ok) return { text: JSON.stringify(local) };
+        const result = await job.prepareSubmission(reviewedInventory as ApplicationInventory, { manualTakeoverCompleted });
+        submissionPrepared = result.ok;
+        return { text: JSON.stringify(result) };
+      },
+    });
+    tools.record_verified_submission = tool({
+      description: "After Submit, record confirmation text, URL, screenshot, or reference ID. Without evidence the application is never marked Applied.",
+      inputSchema: z.object({ confirmationText: z.string().max(2000).optional(), confirmationUrl: z.string().url().optional(), screenshotKey: z.string().max(500).optional(), referenceId: z.string().max(500).optional() }),
+      execute: async (evidence) => {
+        const result = await job.recordSubmission(evidence);
+        emit({
+          type: "application_status",
+          applicationId: job.applicationId,
+          status: result.ok ? "applied" : "needs_attention",
+          detail: result.ok ? "Submission confirmed" : result.reason,
+        });
+        return { text: JSON.stringify(result) };
+      },
+    });
+    tools.record_application_failure = tool({
+      description: "Record a structured failure or closed job without including form values, credentials, or mailbox content.",
+      inputSchema: z.object({ reason: z.string().min(1).max(1000) }),
+      execute: async ({ reason }) => {
+        if (/\b(?:reCAPTCHA|CAPTCHA|hCaptcha|Turnstile|device confirmation|non-email MFA|multi-factor authentication|two-factor authentication|unusual legal (?:term|language)|revoked Gmail)\b/i.test(reason)) {
+          return { text: "This condition requires manual takeover, not a terminal failure. Call request_manual_takeover now." };
+        }
+        if (/\b(?:candidate profile|candidate data|not configured|selected r[eé]sum[eé].*(?:missing|unavailable)|Gmail verification is unavailable)\b/i.test(reason)) {
+          await job.recordAttention(reason);
+          emit({ type: "application_status", applicationId: job.applicationId, status: "needs_attention", detail: "Application configuration needs attention" });
+          return { text: "The application was paused for configuration instead of being marked failed." };
+        }
+        await job.recordFailure(reason);
+        emit({ type: "application_status", applicationId: job.applicationId, status: "failed", detail: "Structured failure recorded" });
+        return { text: "Failure recorded." };
+      },
+    });
+  }
+
   const messages: ModelMessage[] = [];
-  const system = buildSystemPrompt(opts.site);
+  const system = opts.job?.systemPrompt ?? buildSystemPrompt(opts.site);
 
   async function runTurn(text: string): Promise<void> {
     messages.push({ role: "user", content: text });
@@ -340,12 +513,22 @@ export async function startAiSdkAgent(
       choices.delete(requestId);
       pending.resolve(selected);
     },
+    answerJobQuestion(requestId, value) {
+      jobAnswers.get(requestId)?.(value);
+    },
+    resolveTakeover(requestId, enabled) {
+      takeovers.get(requestId)?.(enabled);
+    },
     async interrupt() {
       interruptedByUser = true;
       approvals.forEach((resolve) => resolve(false));
       approvals.clear();
       choices.forEach(({ resolve }) => resolve(null));
       choices.clear();
+      jobAnswers.forEach((resolve) => resolve(null));
+      jobAnswers.clear();
+      takeovers.forEach((resolve) => resolve(false));
+      takeovers.clear();
       currentTurn?.abort();
     },
     downloadDetected(filename: string) {
@@ -365,6 +548,10 @@ export async function startAiSdkAgent(
       approvals.clear();
       choices.forEach(({ resolve }) => resolve(null));
       choices.clear();
+      jobAnswers.forEach((resolve) => resolve(null));
+      jobAnswers.clear();
+      takeovers.forEach((resolve) => resolve(false));
+      takeovers.clear();
       input.close();
       currentTurn?.abort();
       await browser.close().catch(() => {});

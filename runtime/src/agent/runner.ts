@@ -24,6 +24,32 @@ import {
 } from "../session/events";
 import type { TargetSite } from "../store";
 import type { WireFormat } from "@browserpilot/core";
+import type { ApplicationInventory, JobAnswerType, SubmissionEvidence } from "@browserpilot/core";
+
+export type JobAgentHandlers = {
+  applicationId: string;
+  systemPrompt: string;
+  lookupCandidate: (fields: string[]) => Promise<Record<string, string>>;
+  lookupSavedAnswer: (question: { label: string; answerType: JobAnswerType; options: string[] }) => Promise<string | null>;
+  getPortalAccount: () => Promise<{ username: string; password: string }>;
+  confirmPortalAccount: (verified: boolean) => Promise<void>;
+  resetPortalAccount: () => Promise<{ username: string; password: string }>;
+  waitForGmailVerification: (afterIso: string) => Promise<{ code?: string; link?: string }>;
+  saveAnswer: (question: { label: string; answerType: JobAnswerType; options: string[] }, value: unknown) => Promise<string>;
+  getApplicationSchema: (input: { boardToken?: string }) => Promise<Record<string, unknown>>;
+  getApplicationDocuments: () => Promise<{ resume: string; coverLetter?: string }>;
+  getCoverLetterContext: () => Promise<{ profile: Record<string, unknown>; resumeText: string }>;
+  generateCoverLetter: (content: string) => Promise<string>;
+  discoverJob: (identity: { externalJobId: string; company?: string; roleTitle?: string; location?: string }) => Promise<{ duplicateOf?: string }>;
+  prepareSubmission: (
+    inventory: ApplicationInventory,
+    context: { manualTakeoverCompleted: boolean },
+  ) => Promise<{ ok: boolean; reasons?: string[] }>;
+  recordSubmission: (evidence: SubmissionEvidence) => Promise<{ ok: boolean; reason?: string }>;
+  recordFailure: (reason: string) => Promise<void>;
+  recordAttention: (reason: string) => Promise<void>;
+  resolvePlaceholder: (placeholder: import("@browserpilot/core").JobPlaceholder) => Promise<unknown>;
+};
 
 export type QueryFn = (params: { prompt: AsyncIterable<never>; options?: Options }) => Query;
 
@@ -47,6 +73,8 @@ export type StartAgentOptions = {
   baseUrl?: string;
   /** Auth headers, already shaped for this provider's credential kind. */
   headers?: Record<string, string>;
+  /** Present only for an owner-isolated public job application. */
+  job?: JobAgentHandlers;
   /** Node binary used to run the MCP server. Override when it isn't on PATH. */
   nodeBin?: string;
   /** Named in the URLs the agent's screenshots are served from. */
@@ -87,6 +115,8 @@ export type AgentRunner = {
   send(text: string, voiceTaskId?: string): void;
   approve(requestId: string, approved: boolean): void;
   choose(requestId: string, value: string): void;
+  answerJobQuestion?(requestId: string, value: string | number | boolean | string[]): void;
+  resolveTakeover?(requestId: string, enabled: boolean): void;
   /** Stop the current model turn while keeping the Claude session reusable. */
   interrupt(): Promise<void>;
   /** Block follow-up browser calls as soon as Chromium reports a download. */
@@ -175,7 +205,7 @@ export async function startAgent(
   opts: StartAgentOptions,
   deps: StartAgentDeps = {},
 ): Promise<AgentRunner> {
-  const engine = deps.engine ?? engineFrom(process.env);
+  const engine = opts.job ? "sdk" : (deps.engine ?? engineFrom(process.env));
   if (engine === "sdk") {
     // Imported here rather than at the top so a deployment on the old engine
     // never loads the new one's dependencies — including the MCP client, which
@@ -521,6 +551,8 @@ export async function startAgent(
       choices.delete(requestId);
       pending.resolve(selected);
     },
+    answerJobQuestion() {},
+    resolveTakeover() {},
     async interrupt() {
       interruptedByUser = true;
       approvals.forEach((resolve) => resolve(false));

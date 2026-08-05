@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { hasAdminAccess, requireUser } from "@/lib/auth";
+import { can, hasAdminAccess, requireUser } from "@/lib/auth";
 import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppNavLink } from "@/components/app-nav-link";
 import { logout } from "./actions";
+import type { Permission } from "@browserpilot/core";
+import { jobModeEnabled } from "@/lib/job-mode";
 
-const NAV = [
+const NAV: Array<{ href: string; label: string; permission?: Permission }> = [
   { href: "/", label: "Sessions" },
+  { href: "/jobs", label: "Jobs", permission: "job.apply" },
   { href: "/files", label: "Files" },
   { href: "/sites", label: "Sites" },
   { href: "/devices", label: "Devices" },
@@ -15,6 +18,10 @@ const NAV = [
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const adminAccess = hasAdminAccess(user);
+  const nav = NAV.filter((item) => {
+    if (item.href === "/jobs" && !jobModeEnabled()) return false;
+    return !item.permission || can(user, item.permission);
+  });
 
   // One provider for the whole console: it is what shares the open/close
   // delay between tooltips, so moving between two adjacent controls does not
@@ -36,7 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Separator />
 
         <nav className="flex flex-1 flex-col gap-0.5 p-3">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <AppNavLink
               key={item.href}
               href={item.href}
@@ -89,7 +96,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <span className="text-signal font-mono">▚</span> BrowserPilot
           </Link>
           <nav className="text-muted-foreground flex gap-3 overflow-x-auto text-sm">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <AppNavLink
                 key={item.href}
                 href={item.href}

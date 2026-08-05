@@ -13,6 +13,9 @@ const nextConfig: NextConfig = {
   // so Next has to compile them alongside the app.
   transpilePackages: ["@browserpilot/db", "@browserpilot/core"],
   serverExternalPackages: ["postgres"],
+  experimental: {
+    serverActions: { bodySizeLimit: "12mb" },
+  },
 };
 
 export default nextConfig;

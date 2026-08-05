@@ -179,3 +179,73 @@ export function runtimeWsUrl(sessionId: string, ticket: string): string {
 export function runtimeHttpUrl(): string {
   return RUNTIME_URL;
 }
+
+/** Upload a private candidate document without routing its bytes through the database. */
+export async function uploadJobDocument(
+  user: CurrentUser,
+  documentId: string,
+  file: File,
+): Promise<{ ok: true; data: { key: string; filename: string; size: number; contentType: string; encryptionAad: string; extractedTextEncrypted: string } } | { ok: false; error: string }> {
+  const ticket = await ticketFor(user, "pending");
+  const form = new FormData();
+  form.set("documentId", documentId);
+  form.set("file", file);
+  try {
+    const response = await fetch(`${RUNTIME_URL}/api/job-documents`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}` },
+      body: form,
+      cache: "no-store",
+    });
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) return { ok: false, error: String(body.error ?? "Upload failed") };
+    return { ok: true, data: body as { key: string; filename: string; size: number; contentType: string; encryptionAad: string; extractedTextEncrypted: string } };
+  } catch (error) {
+    return { ok: false, error: `The browser service is unreachable (${(error as Error).message})` };
+  }
+}
+
+export async function fetchJobDocument(user: CurrentUser, documentId: string): Promise<Response> {
+  const ticket = await ticketFor(user, "pending");
+  return fetch(`${RUNTIME_URL}/api/job-documents/${documentId}`, {
+    headers: { authorization: `Bearer ${ticket}` },
+    cache: "no-store",
+  });
+}
+
+export async function deleteJobDocument(user: CurrentUser, documentId: string): Promise<boolean> {
+  const ticket = await ticketFor(user, "pending");
+  const response = await fetch(`${RUNTIME_URL}/api/job-documents/${documentId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${ticket}` },
+    cache: "no-store",
+  }).catch(() => null);
+  return Boolean(response?.ok);
+}
+
+export async function sendJobAnswer(
+  user: CurrentUser,
+  sessionId: string,
+  requestId: string,
+  value: string | number | boolean | string[],
+): Promise<boolean> {
+  const ticket = await ticketFor(user, sessionId);
+  const response = await fetch(`${RUNTIME_URL}/api/sessions/${sessionId}/job-answer`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+    body: JSON.stringify({ requestId, value }),
+    cache: "no-store",
+  }).catch(() => null);
+  return Boolean(response?.ok);
+}
+
+export async function finishJobTakeover(user: CurrentUser, sessionId: string, requestId: string): Promise<boolean> {
+  const ticket = await ticketFor(user, sessionId);
+  const response = await fetch(`${RUNTIME_URL}/api/sessions/${sessionId}/takeover`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+    body: JSON.stringify({ requestId, enabled: true }),
+    cache: "no-store",
+  }).catch(() => null);
+  return Boolean(response?.ok);
+}

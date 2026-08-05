@@ -1,20 +1,27 @@
-import { mkdir, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
-import type { AgentRunner } from "../agent/runner";
+import { chmod, mkdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { basename, join, resolve } from "node:path";
+import { lookup } from "node:dns/promises";
+import type { AgentRunner, JobAgentHandlers } from "../agent/runner";
 import type { RobotBrowser, SavedCookie } from "../browser/chromium";
 import type { InputSink, RemoteInput } from "../browser/input";
 import type { ScreencastOptions } from "../browser/screencast";
 import { agentProviderOptions, type ProviderSettings } from "../agent/provider-settings";
-import { resolveModel, type WireFormat } from "@browserpilot/core";
+import { atsPlaybook, portalAccountKey, resolveModel, resolvePublicJobUrl, type WireFormat } from "@browserpilot/core";
 import { contentTypeFor } from "@browserpilot/core";
 import { objectKey, type ObjectStore } from "../storage/object-store";
 import type { ProfileStore } from "../browser/profiles";
 import { looksSignedOut } from "./signed-out";
-import type { Store, TargetSite } from "../store";
+import type { ClaimedJobApplication, Store, TargetSite } from "../store";
+import { GmailClient } from "../jobs/gmail";
+import { renderCoverLetterPdf } from "../jobs/documents";
+import { getAtsApplicationSchema, schemaRequiresManualLegalReview } from "../jobs/application-schema";
 import { sessionFileUrl, type RobotEvent, type SessionStatus } from "./events";
 
 export type LaunchArgs = {
   targetUrl: string;
+  /** Job mode uses this to reject private or non-HTTPS redirect destinations. */
+  validateNavigation?: (url: string) => Promise<void>;
   /** Cookies from an earlier sign-in, applied before the first navigation. */
   cookies?: SavedCookie[];
   /** Only for cookie_mint sites; a saved profile brings its own session. */
@@ -45,6 +52,7 @@ export type AgentArgs = {
   /** Where those screenshots are written, alongside the session's downloads. */
   saveFile: (filename: string, bytes: Uint8Array) => Promise<void>;
   onEvent: (event: RobotEvent) => void;
+  job?: JobAgentHandlers;
 };
 
 /**
@@ -112,10 +120,12 @@ type Continuation = {
 export type Session = {
   id: string;
   userId: string;
-  siteProfileId: string;
+  siteProfileId: string | null;
   siteName: string;
   /** An agent session is driven by the robot; a login session by the person. */
-  kind: "agent" | "login";
+  kind: "agent" | "login" | "job";
+  jobApplicationId?: string;
+  manualTakeoverActive?: boolean;
   status: SessionStatus;
   startedAt: number;
   lastActivityAt: number;
@@ -466,6 +476,275 @@ export class SessionManager {
     return id;
   }
 
+  /** Start an owner-isolated browser session for one durable public job application. */
+  async createJob(application: ClaimedJobApplication): Promise<string> {
+    const { store } = this.deps;
+    const owner = await store.owner(application.userId);
+    if (!owner) throw new SessionError("No such active user", "unknown_user");
+    const settings = await store.settings();
+    if ((await store.liveSessionCount()) >= settings.globalSessionLimit) {
+      throw new SessionError("The server is at its browser limit", "global_limit");
+    }
+    if ((await store.liveSessionCount(application.userId)) >= settings.perUserSessionLimit) {
+      throw new SessionError("The user is at their browser limit", "user_limit");
+    }
+    const resolved = await resolvePublicJobUrl(application.sourceUrl, (hostname) =>
+      lookup(hostname, { all: true, verbatim: true }));
+    const provider = await this.deps.resolveProvider();
+    if (!provider) throw new SessionError("No model provider is configured", "no_provider");
+    const model = resolveModel({
+      requested: application.model,
+      preferred: owner.preferredModel,
+      fallback: settings.defaultModel,
+      catalogue: provider.models.filter((choice) => choice.vision),
+    });
+    if (!model) throw new SessionError("A vision-capable model is required for job mode", "no_provider");
+
+    const id = await store.createJobSession(application, model);
+    const downloadsDir = join(this.config.downloadsRoot, id);
+    await mkdir(downloadsDir, { recursive: true }).catch(() => {});
+    const browser = await this.launchBrowserWithRetry({
+      targetUrl: resolved.url.toString(),
+      downloadsDir,
+      validateNavigation: async (url) => {
+        await resolvePublicJobUrl(url, (hostname) => lookup(hostname, { all: true, verbatim: true }));
+      },
+    });
+    const playbook = atsPlaybook(application.sourceUrl);
+    const site: TargetSite = {
+      id: `job:${application.id}`,
+      name: `${playbook.kind} job portal`,
+      baseUrl: resolved.url.origin,
+      loginStrategy: "manual_login",
+      cookieName: "session",
+      loggedOutPattern: null,
+      secret: null,
+      destructivePatterns: ["submit", "apply", "send application", "complete application"],
+      systemPromptNotes: null,
+    };
+    const systemPrompt = [
+      `You are completing application ${application.id} at ${application.sourceUrl}.`,
+      `Use the ${playbook.kind} playbook. Account scope is ${playbook.accountScope}.`,
+      "Navigate only to public HTTPS job and documented authentication destinations. Take a fresh snapshot after every redirect.",
+      "Never ask for or expose passwords, Gmail bodies, verification codes, decrypted file paths, or unnecessary candidate fields.",
+      "Use lookup_candidate and opaque placeholders for form values. Call get_portal_account only when the visible portal actually requires signup or login; direct application forms need no portal account.",
+      "After visible signup/login success call confirm_portal_account. If stored credentials are rejected, use reset_portal_account and the Gmail verification tool; do not invent or expose credentials.",
+      "For every visible question call lookup_saved_answer first; only when it returns no exact match use request_unseen_answer.",
+      "Use get_application_schema when available. It may include savedAnswer placeholders on exact questions; use those values and never infer or override an answer from résumé, education, visa, or other background context. Copy question labels and options exactly from the schema or DOM; never paraphrase them, simplify choices, or invent Yes/No options.",
+      "Treat standard School, Degree, Discipline/Major, and education year controls as candidate fields: use lookup_candidate for school, degree, discipline, educationStartYear, and educationEndYear. Never infer candidate location from the job location.",
+      "Call record_job_identity as soon as the portal job ID is visible, and stop if it reports a duplicate.",
+      "Use get_application_documents for résumé/cover-letter upload placeholders. If a cover letter is required, use get_cover_letter_context then generate_cover_letter before uploading it.",
+      "For CAPTCHA, device confirmation, non-email MFA, revoked Gmail, or unusual legal language use request_manual_takeover; never bypass them.",
+      "Before clicking Submit/Apply, call prepare_application_submission with the complete inventory. The runtime blocks the click until it passes.",
+      "After submission, call record_verified_submission with confirmation evidence. Never claim success without that tool accepting evidence.",
+    ].join("\n");
+
+    let agent: AgentRunner;
+    const protectedValues = new Map<string, unknown>();
+    let schemaRequiresLegalReview = false;
+    const jobScratchDir = resolve(this.config.scratchRoot, id, "job-documents");
+    const documentPaths = new Map<"resume" | "cover_letter", string>();
+    const scopedPortalKey = portalAccountKey(application.sourceUrl);
+    await mkdir(jobScratchDir, { recursive: true });
+
+    const protectValue = (kind: "ANSWER" | "SECRET", value: unknown): string => {
+      const token = `${kind.toLowerCase()}_${randomUUID()}`;
+      protectedValues.set(token, value);
+      return `{{BP_${kind}:${token}}}`;
+    };
+
+    const materializeDocument = async (kind: "resume" | "cover_letter"): Promise<string> => {
+      const cached = documentPaths.get(kind);
+      if (cached) return cached;
+      const document = await store.applicationDocument(application.userId, application.id, kind);
+      if (!document) throw new Error(`${kind === "resume" ? "Résumé" : "Cover letter"} is unavailable`);
+      const stream = await (await this.deps.objects()).get(document.objectKey);
+      if (!stream) throw new Error("The encrypted application document is missing");
+      const sealed = new Uint8Array(await new Response(stream).arrayBuffer());
+      const plaintext = store.unsealJobDocument(application.userId, document.id, sealed);
+      const path = join(jobScratchDir, `${kind}-${basename(document.filename)}`);
+      await Bun.write(path, plaintext);
+      await chmod(path, 0o600).catch(() => {});
+      documentPaths.set(kind, path);
+      return path;
+    };
+    try {
+      agent = await this.deps.startAgent({
+        cdpEndpoint: browser.cdpEndpoint,
+        site,
+        model,
+        ...agentProviderOptions(provider, model),
+        nodeBin: this.config.nodeBin,
+        sessionId: id,
+        saveFile: (filename, bytes) => this.storeBytes(id, downloadsDir, filename, bytes),
+        onEvent: (event) => this.handleEvent(id, event),
+        job: {
+          applicationId: application.id,
+          systemPrompt,
+          lookupCandidate: (fields) => store.candidatePlaceholders(application.userId, fields),
+          lookupSavedAnswer: async (question) => {
+            const answer = await store.savedJobAnswer(application.userId, question);
+            return answer === null ? null : protectValue("ANSWER", answer);
+          },
+          getPortalAccount: () => store.portalAccountPlaceholders(application.userId, scopedPortalKey, resolved.url.origin),
+          confirmPortalAccount: (verified) => store.markPortalAccountActive(application.userId, scopedPortalKey, verified),
+          resetPortalAccount: () => store.resetPortalAccount(application.userId, scopedPortalKey),
+          waitForGmailVerification: async (afterIso) => {
+            const credentials = await store.gmailCredentials(application.userId);
+            const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+            const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+            if (!credentials || !clientId || !clientSecret) throw new Error("Gmail verification is unavailable; request manual takeover");
+            const gmail = new GmailClient({ clientId, clientSecret, ...credentials });
+            const recipientEmail = await store.applicationEmail(application.userId);
+            const after = new Date(afterIso);
+            if (!Number.isFinite(after.getTime())) throw new Error("The verification start time is invalid");
+            try {
+              for (let attempt = 0; attempt < 24; attempt++) {
+                const result = await gmail.findVerification(after, resolved.url.hostname, recipientEmail);
+                if (result) {
+                  await store.recordGmailUse(application.userId);
+                  const response: { code?: string; link?: string } = {};
+                  if (result.code) response.code = protectValue("SECRET", result.code);
+                  if (result.link) response.link = protectValue("SECRET", result.link);
+                  return response;
+                }
+                await Bun.sleep(5_000);
+              }
+            } catch (error) {
+              await store.recordGmailUse(application.userId, error as Error);
+              throw new Error("Gmail verification is unavailable; request manual takeover");
+            }
+            throw new Error("No verification message arrived; request manual takeover");
+          },
+          saveAnswer: async (question, value) => {
+            await store.saveJobAnswer(application.userId, application.id, question, value);
+            return protectValue("ANSWER", value);
+          },
+          getApplicationSchema: async (input) => {
+            const schema = await getAtsApplicationSchema(application.sourceUrl, input);
+            if (!schema.available) return schema;
+            schemaRequiresLegalReview = schemaRequiresManualLegalReview(schema);
+            const questions = await Promise.all(schema.questions.map(async (question) => {
+              const options = question.fields.flatMap((field) => field.values);
+              const fieldType = question.fields[0]?.type ?? "";
+              const answerType = fieldType.includes("multi_value_single_select") ? "single_choice" as const
+                : fieldType.includes("multi_value_multi_select") ? "multi_choice" as const
+                  : fieldType.includes("input_text") ? "text" as const
+                    : null;
+              if (!answerType) return question;
+              const saved = await store.savedJobAnswer(application.userId, {
+                label: question.label,
+                answerType,
+                options,
+              });
+              return saved === null ? question : { ...question, savedAnswer: protectValue("ANSWER", saved) };
+            }));
+            return { ...schema, questions };
+          },
+          getApplicationDocuments: async () => {
+            const resume = await store.applicationDocument(application.userId, application.id, "resume");
+            if (!resume) throw new Error("The selected résumé is unavailable");
+            const coverLetter = await store.applicationDocument(application.userId, application.id, "cover_letter");
+            return {
+              resume: "{{BP_DOCUMENT:resume}}",
+              ...(coverLetter ? { coverLetter: "{{BP_DOCUMENT:cover_letter}}" } : {}),
+            };
+          },
+          getCoverLetterContext: () => store.coverLetterContext(application.userId, application.id),
+          generateCoverLetter: async (content) => {
+            const existing = await store.applicationDocument(application.userId, application.id, "cover_letter");
+            if (existing) return "{{BP_DOCUMENT:cover_letter}}";
+            const documentId = randomUUID();
+            const filename = `cover-letter-${application.id}.pdf`;
+            const objectKey = `jobs/${application.userId}/${documentId}/${filename}`;
+            const plaintext = await renderCoverLetterPdf(content);
+            const sealed = store.sealJobDocument(application.userId, documentId, plaintext);
+            const staged = join(jobScratchDir, `${documentId}.encrypted`);
+            await Bun.write(staged, sealed);
+            try {
+              await (await this.deps.objects()).put(objectKey, staged, "application/octet-stream");
+            } finally {
+              await rm(staged, { force: true }).catch(() => {});
+            }
+            try {
+              await store.saveGeneratedCoverLetter({
+                id: documentId,
+                userId: application.userId,
+                applicationId: application.id,
+                filename,
+                objectKey,
+                contentType: "application/pdf",
+                sizeBytes: plaintext.byteLength,
+                encryptionAad: `${application.userId}:${documentId}`,
+                extractedTextEncrypted: store.sealJobExtractedText(content),
+              });
+            } catch (error) {
+              await (await this.deps.objects()).delete(objectKey).catch(() => {});
+              throw error;
+            }
+            return "{{BP_DOCUMENT:cover_letter}}";
+          },
+          discoverJob: (identity) => store.discoverJobIdentity(application.userId, application.id, {
+            ...identity,
+            portalKey: scopedPortalKey,
+          }),
+          prepareSubmission: (inventory, context) => store.prepareJobSubmission(application.userId, application.id, {
+            ...inventory,
+            unusualLegalLanguage: inventory.unusualLegalLanguage ||
+              (schemaRequiresLegalReview && !context.manualTakeoverCompleted),
+            resumeStaged: documentPaths.has("resume"),
+            coverLetterStaged: !inventory.coverLetterRequired || documentPaths.has("cover_letter"),
+          }),
+          recordSubmission: (evidence) => store.recordJobSubmission(application.userId, application.id, evidence),
+          recordFailure: (reason) => store.failJob(application.userId, application.id, reason),
+          recordAttention: (reason) => store.pauseJob(application.userId, application.id, reason),
+          resolvePlaceholder: async (placeholder) => {
+            if (placeholder.kind === "PROFILE") return store.resolveProfilePlaceholder(application.userId, placeholder.id);
+            if (placeholder.kind === "ANSWER" && protectedValues.has(placeholder.id)) return protectedValues.get(placeholder.id);
+            if (placeholder.kind === "SECRET" && protectedValues.has(placeholder.id)) return protectedValues.get(placeholder.id);
+            if (placeholder.kind === "SECRET") return store.resolvePortalPlaceholder(application.userId, placeholder.id);
+            if (placeholder.kind === "DOCUMENT" && placeholder.id === "resume") return materializeDocument("resume");
+            if (placeholder.kind === "DOCUMENT" && placeholder.id === "cover_letter") return materializeDocument("cover_letter");
+            throw new Error("The requested protected value is unavailable");
+          },
+        },
+      });
+    } catch (error) {
+      await browser.close().catch(() => {});
+      await this.discardScratch(jobScratchDir);
+      await store.failJob(application.userId, application.id, "The job agent could not start");
+      await store.setStatus(id, "failed", "job agent start failed");
+      throw error;
+    }
+    this.attachDownloads(id, browser, downloadsDir);
+    const input = await this.deps.createInput(browser.page);
+    const now = this.deps.now();
+    this.sessions.set(id, {
+      id,
+      userId: application.userId,
+      siteProfileId: null,
+      siteName: site.name,
+      kind: "job",
+      jobApplicationId: application.id,
+      status: "working",
+      startedAt: now,
+      lastActivityAt: now,
+      previewEnabled: false,
+      browser,
+      agent,
+      input,
+      model,
+      scratchProfileDir: jobScratchDir,
+      automaticBrowserRestarts: 0,
+      listeners: new Set(), frameListeners: new Set(), pendingWrites: new Set(), voiceCommandResults: new Map(),
+    });
+    this.watchBrowser(id, browser);
+    await store.setStatus(id, "working");
+    this.handleEvent(id, { type: "application_status", applicationId: application.id, status: "running", detail: "Application browser started" });
+    agent.send("Inspect the job page and complete the application according to the job-mode rules.");
+    return id;
+  }
+
   /**
    * Continue a terminal robot run in a new browser.
    *
@@ -606,7 +885,7 @@ export class SessionManager {
    */
   async saveLogin(id: string): Promise<void> {
     const session = this.require(id);
-    if (session.kind !== "login") throw new Error("Not a sign-in session");
+    if (session.kind !== "login" || !session.siteProfileId) throw new Error("Not a sign-in session");
 
     // Read the cookies while the browser still holds them. Chromium writes the
     // ones with an expiry to the profile, but keeps session cookies in memory
@@ -629,7 +908,7 @@ export class SessionManager {
   /** Forward one click or keystroke from the person to the browser. */
   async dispatchInput(id: string, event: RemoteInput): Promise<void> {
     const session = this.require(id);
-    if (session.kind !== "login" || !session.input) return;
+    if (!session.input || (session.kind !== "login" && !(session.kind === "job" && session.manualTakeoverActive))) return;
     session.lastActivityAt = this.deps.now();
     await session.input.dispatch(event).catch(() => {
       // A dropped keystroke is not worth ending a sign-in over.
@@ -709,6 +988,18 @@ export class SessionManager {
 
   get(id: string): Session | undefined {
     return this.sessions.get(id);
+  }
+
+  /** Mirror a durable outbox status to the active job socket, when one exists. */
+  publishNotificationStatus(
+    applicationId: string | null,
+    status: "sending" | "sent" | "failed",
+  ): void {
+    if (!applicationId) return;
+    const session = this.list().find((candidate) =>
+      candidate.kind === "job" && candidate.jobApplicationId === applicationId
+    );
+    if (session) this.emit(session, { type: "notification_status", applicationId, status });
   }
 
   list(): Session[] {
@@ -975,6 +1266,21 @@ export class SessionManager {
     session.agent.choose(requestId, value);
   }
 
+  answerJobQuestion(id: string, requestId: string, value: string | number | boolean | string[]): void {
+    const session = this.require(id);
+    if (session.kind !== "job" || !session.agent?.answerJobQuestion) return;
+    session.lastActivityAt = this.deps.now();
+    this.setStatus(session, "working");
+    session.agent.answerJobQuestion(requestId, value);
+  }
+
+  resolveTakeover(id: string, requestId: string, enabled: boolean): void {
+    const session = this.require(id);
+    if (session.kind !== "job" || !session.agent?.resolveTakeover) return;
+    session.lastActivityAt = this.deps.now();
+    session.agent.resolveTakeover(requestId, enabled);
+  }
+
   async setPreview(id: string, enabled: boolean): Promise<void> {
     const session = this.require(id);
     if (enabled === session.previewEnabled) return;
@@ -1005,6 +1311,10 @@ export class SessionManager {
   private watchBrowser(id: string, browser: RobotBrowser): void {
     browser.onClose(() => {
       const session = this.sessions.get(id);
+      if (session?.kind === "job" && session.browser === browser) {
+        void this.stop(id, "The job browser exited before verified completion");
+        return;
+      }
       if (
         !session ||
         session.kind !== "agent" ||
@@ -1051,7 +1361,7 @@ export class SessionManager {
 
   private async replaceBrowser(id: string, automatic: boolean): Promise<void> {
     const session = this.require(id);
-    if (session.kind !== "agent" || !session.agent) {
+    if (session.kind !== "agent" || !session.agent || !session.siteProfileId) {
       throw new Error("Only a robot session has a browser to restart");
     }
     if (session.restartingBrowser) return;
@@ -1206,27 +1516,35 @@ export class SessionManager {
     // expire the moment this copy was thrown away, so a cleanly finished
     // session writes what it learned back to the saved login. The browser is
     // already closed, so its state is on disk to be copied.
-    if (session.scratchProfileDir) {
+    if (session.scratchProfileDir && session.siteProfileId) {
+      const siteProfileId = session.siteProfileId;
       await this.deps.profiles
-        .syncBack(session.siteProfileId, session.userId, session.scratchProfileDir)
+        .syncBack(siteProfileId, session.userId, session.scratchProfileDir)
         .then(async () => {
           if (freshCookies.length > 0) {
-            await this.deps.store.saveCookies(session.userId, session.siteProfileId, freshCookies);
+            await this.deps.store.saveCookies(session.userId, siteProfileId, freshCookies);
           }
-          await this.deps.store.markSynced(session.userId, session.siteProfileId);
+          await this.deps.store.markSynced(session.userId, siteProfileId);
         })
         .catch(() => {
           // The saved login simply stays as it was.
         });
-      await this.discardScratch(session.scratchProfileDir);
     }
+    await this.discardScratch(session.scratchProfileDir);
 
     await this.deps.store.setStatus(id, "stopped", reason).catch(() => {});
+    if (session.kind === "job" && session.jobApplicationId) {
+      await this.deps.store.pauseJob(session.userId, session.jobApplicationId, reason).catch(() => {});
+    }
   }
 
   async sweep(): Promise<void> {
     const settings = await this.deps.store.settings();
     const now = this.deps.now();
+
+    await Promise.all(this.list()
+      .filter((session) => session.kind === "job" && session.jobApplicationId)
+      .map((session) => this.deps.store.renewJobLease(session.userId, session.jobApplicationId!)));
 
     const expired = this.list().filter(
       (s) =>
@@ -1254,8 +1572,15 @@ export class SessionManager {
     if (!session) return;
 
     session.lastActivityAt = this.deps.now();
-    if (event.type === "approval_request" || event.type === "choice_request") {
+    if (event.type === "approval_request" || event.type === "choice_request" || event.type === "job_question" || (event.type === "manual_takeover" && event.active)) {
       this.setStatus(session, "awaiting_approval");
+    }
+    if (event.type === "job_question") {
+      this.persist(session, () => this.deps.store.recordJobQuestion(session.userId, event));
+    }
+    if (event.type === "manual_takeover") {
+      session.manualTakeoverActive = event.active;
+      this.persist(session, () => this.deps.store.recordTakeover(session.userId, event));
     }
     if (event.type === "file_ready") this.setStatus(session, "idle");
     if (event.type === "error") this.setStatus(session, "failed");
@@ -1276,6 +1601,12 @@ export class SessionManager {
             outcome: event.outcome,
           }),
         );
+      }
+      if (session.kind === "job" && session.jobApplicationId) {
+        const reason = event.outcome === "failed"
+          ? "The application agent failed before verified completion"
+          : "The application agent stopped without verified submission evidence";
+        this.persist(session, () => this.deps.store.pauseJob(session.userId, session.jobApplicationId!, reason));
       }
     }
 

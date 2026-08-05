@@ -24,6 +24,7 @@ describe("loadConfig", () => {
     expect(cfg.defaultModel).toBe("claude-opus-5");
     expect(cfg.nodeBin).toBe("node");
     expect(cfg.downloadsRoot).toBe("./downloads");
+    expect(cfg.jobModeEnabled).toBe(true);
     expect(cfg.provider.credential).toEqual({ kind: "oauth", value: "oauth-token" });
     expect(cfg.provider.baseUrl).toBeUndefined();
   });
@@ -86,6 +87,11 @@ describe("loadConfig", () => {
     const cfg = loadConfig({ ...base, BP_PORT: "9000", BP_NODE_BIN: "/usr/bin/node" });
     expect(cfg.port).toBe(9000);
     expect(cfg.nodeBin).toBe("/usr/bin/node");
+  });
+
+  test("job mode defaults off in production and can be deliberately enabled", () => {
+    expect(loadConfig({ ...base, NODE_ENV: "production" }).jobModeEnabled).toBe(false);
+    expect(loadConfig({ ...base, NODE_ENV: "production", BP_JOB_MODE_ENABLED: "true" }).jobModeEnabled).toBe(true);
   });
 });
 

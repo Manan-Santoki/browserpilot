@@ -1,4 +1,4 @@
-import { modelCatalogue, type ModelChoice } from "@browserpilot/core";
+import { isJobModeEnabled, modelCatalogue, type ModelChoice } from "@browserpilot/core";
 
 /**
  * How the agent authenticates to whichever Messages API it is pointed at.
@@ -45,6 +45,8 @@ export type RuntimeConfig = {
   /** Used when the database has no `defaultModel` row of its own. */
   defaultModel: string;
   nodeBin: string;
+  /** Internal beta gate. Production defaults to disabled. */
+  jobModeEnabled: boolean;
   provider: AiProvider;
 };
 
@@ -153,6 +155,7 @@ export function loadConfig(env: Record<string, string | undefined>): RuntimeConf
     // deployment does not need a second variable to be usable.
     defaultModel: env.BP_MODEL?.trim() || provider.models[0]?.value || "claude-opus-5",
     nodeBin: env.BP_NODE_BIN?.trim() || "node",
+    jobModeEnabled: isJobModeEnabled(env),
     provider,
   };
 }

@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod/v4";
-import type { WireFormat } from "@browserpilot/core";
+import { redactJobToolInput, substituteJobPlaceholders, type JobPlaceholder, type WireFormat } from "@browserpilot/core";
 import { classifyToolUse } from "../policy";
 import {
   normalizeToolInput,
@@ -37,7 +37,49 @@ export type ToolDeps = {
   completedDownload: () => string | undefined;
   /** Collects images for the hoist. Only used by OpenAI-format providers. */
   collectImage: (image: CapturedImage) => void;
+  /** Job sessions enforce the final Submit/Apply gate in runtime code. */
+  canSubmit?: () => boolean;
+  resolvePlaceholder?: (placeholder: JobPlaceholder) => Promise<unknown>;
+  /** Shared across all browser tools in one job session. */
+  sensitiveValues?: Set<string>;
 };
+
+function rememberSensitive(value: unknown, values: Set<string>): void {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length >= 4) values.add(trimmed);
+    const digits = trimmed.replace(/\D/g, "");
+    if (digits.length >= 7) {
+      values.add(digits);
+      if (digits.length > 10) values.add(digits.slice(-10));
+    }
+    return;
+  }
+  if (Array.isArray(value)) value.forEach((item) => rememberSensitive(item, values));
+  else if (value && typeof value === "object") Object.values(value as Record<string, unknown>)
+    .forEach((item) => rememberSensitive(item, values));
+}
+
+function redactSensitive(text: string, values: Set<string>): string {
+  let redacted = text;
+  const ordered = [...values].sort((a, b) => b.length - a.length);
+  for (const value of ordered) {
+    const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    redacted = redacted.replace(new RegExp(escaped, "gi"), "[protected value]");
+  }
+  return redacted;
+}
+
+function rawFormValue(input: Record<string, unknown>): boolean {
+  const isProtected = (value: unknown) => typeof value === "string" && /^\{\{BP_(?:SECRET|ANSWER|PROFILE):[^{}]+\}\}$/.test(value);
+  if (Object.hasOwn(input, "text") && typeof input.text === "string" && input.text.length > 0 && !isProtected(input.text)) return true;
+  if (!Array.isArray(input.fields)) return false;
+  return input.fields.some((field) => {
+    if (!field || typeof field !== "object") return false;
+    const value = (field as Record<string, unknown>).value;
+    return typeof value === "string" && value.length > 0 && !isProtected(value);
+  });
+}
 
 /** What an MCP tool call returns, in the shape the MCP client gives us. */
 type McpResult = {
@@ -103,6 +145,23 @@ function wrapTool(
     inputSchema: inputSchema as never,
     async execute(rawInput: unknown) {
       const input = (rawInput ?? {}) as Record<string, unknown>;
+      const displayInput = deps.resolvePlaceholder ? redactJobToolInput(input) : input;
+      const activitySummary = summarize(qualified, displayInput);
+
+      const attemptsSubmission =
+        (short === "browser_click" && /\b(submit|apply|send application|complete application)\b/i.test(String(input.element ?? input.ref ?? ""))) ||
+        (short === "browser_press_key" && String(input.key ?? "").toLowerCase() === "enter") ||
+        input.submit === true;
+      if (attemptsSubmission && deps.canSubmit && !deps.canSubmit()) {
+        return { text: "Submit/Apply is blocked until prepare_application_submission returns ok." } satisfies ToolOutcome;
+      }
+
+      if (deps.resolvePlaceholder && ["browser_type", "browser_fill_form", "browser_insert_text"].includes(short) && rawFormValue(input)) {
+        return { text: "Job form values must come from lookup_candidate, lookup_saved_answer, or a newly saved answer placeholder." } satisfies ToolOutcome;
+      }
+      if (deps.resolvePlaceholder && short === "browser_evaluate" && /(?:\.value\s*=|dispatchEvent\s*\(|HTMLInputElement|setAttribute\s*\(\s*['\"]value)/i.test(String(input.function ?? input.expression ?? input.code ?? ""))) {
+        return { text: "Mutating job form values through browser_evaluate is disabled. Use visible browser actions with protected placeholders." } satisfies ToolOutcome;
+      }
 
       // A browser download is the terminal result for this turn. Enforced here
       // rather than in the prompt: otherwise a model keeps inspecting network
@@ -115,7 +174,19 @@ function wrapTool(
       }
 
       // Classified on what the model actually asked for, not on our rewrite.
-      const classification = classifyToolUse(qualified, input, deps.destructivePatterns);
+      let classification = classifyToolUse(qualified, input, deps.destructivePatterns);
+      // A job session may upload only opaque, runtime-staged document
+      // placeholders. This is part of the user's already-consented automatic
+      // application, while ordinary sessions and literal host paths retain
+      // the normal approval gate.
+      if (
+        classification === "approve" &&
+        short === "browser_file_upload" &&
+        deps.resolvePlaceholder &&
+        Array.isArray(input.paths) &&
+        input.paths.length > 0 &&
+        input.paths.every((value) => typeof value === "string" && /^\{\{BP_DOCUMENT:[^{}]+\}\}$/.test(value))
+      ) classification = "auto";
       if (classification === "deny") {
         return {
           text: "Unsafe arbitrary code execution is disabled. Use browser_snapshot and the visible browser actions.",
@@ -123,17 +194,26 @@ function wrapTool(
       }
 
       if (classification === "approve") {
-        const approved = await deps.requestApproval(short, summarize(qualified, input));
+        const approved = await deps.requestApproval(short, activitySummary);
         if (!approved) return { text: "The user declined this action." } satisfies ToolOutcome;
       }
 
       // Denied unsafe calls and stale calls after a completed download are
       // implementation noise, not useful transcript entries — so this is
       // announced only once the call is actually going to happen.
-      deps.emit({ type: "tool_activity", tool: short, summary: summarize(qualified, input) });
+      deps.emit({ type: "tool_activity", tool: short, summary: activitySummary });
 
-      const result = await callTool(normalizeToolInput(qualified, input));
+      const normalized = normalizeToolInput(qualified, input);
+      const executable = deps.resolvePlaceholder
+        ? await substituteJobPlaceholders(normalized, async (placeholder) => {
+          const value = await deps.resolvePlaceholder!(placeholder);
+          rememberSensitive(value, deps.sensitiveValues ?? new Set<string>());
+          return value;
+        }) as Record<string, unknown>
+        : normalized;
+      const result = await callTool(executable);
       const outcome = readMcpResult(short, result);
+      if (deps.sensitiveValues?.size) outcome.text = redactSensitive(outcome.text, deps.sensitiveValues);
 
       if (outcome.image) {
         await deps.onImage(outcome.image);
@@ -159,6 +239,9 @@ export type McpToolSet = Record<
 
 /** Every browser tool, wrapped. */
 export function wrapMcpTools(server: string, tools: McpToolSet, deps: ToolDeps): ToolSet {
+  const sharedDeps: ToolDeps = deps.resolvePlaceholder && !deps.sensitiveValues
+    ? { ...deps, sensitiveValues: new Set<string>() }
+    : deps;
   const wrapped: ToolSet = {};
   for (const [name, definition] of Object.entries(tools)) {
     wrapped[name] = wrapTool(
@@ -167,7 +250,7 @@ export function wrapMcpTools(server: string, tools: McpToolSet, deps: ToolDeps):
       definition.description ?? name,
       definition.inputSchema,
       (args) => definition.execute(args as never),
-      deps,
+      sharedDeps,
     );
   }
   return wrapped;
